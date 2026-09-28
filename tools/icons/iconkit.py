@@ -1,13 +1,18 @@
-"""Tiny painterly icon toolkit: shapes are drawn as masks in a 0..100 coordinate
-space, then shaded (gradient + bevel + specular), outlined and composited over a
-glowing dark backdrop. Rendered at 2x and downsampled for anti-aliasing."""
+"""Painterly icon toolkit (v2).
+
+Shapes are masks drawn in a 0..100 coordinate space. Each part is lit as a rounded
+volume (normals from a blurred height field), gets a thin ink outline and a coloured
+back-light, and is composited over a smoky glowing backdrop. Rendered at 1024 px and
+downsampled to 512 px for anti-aliasing."""
 import math, random
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
-S = 1024          # working resolution
-OUT = 512         # exported resolution
-K = S / 100.0     # 0..100 units -> pixels
+S = 1024
+OUT = 512
+K = S / 100.0
+
+YY, XX = np.mgrid[0:S, 0:S].astype(np.float32) / S * 100.0   # 0..100 coords
 
 
 def clamp01(a):
@@ -30,44 +35,63 @@ def darken(c, t):
     return mix(c, (0, 0, 0), t)
 
 
-# ---------------------------------------------------------------- geometry
+def sat(c, k=1.3):
+    m = sum(c) / 3
+    return tuple(int(max(0, min(255, m + (v - m) * k))) for v in c)
+
+
+# ================================================================ geometry
 def tf(pts, ang=0.0, s=1.0, c=(50, 50), off=(0, 0), sx=None, sy=None):
-    """Rotate (deg) / scale points about c, then translate by off."""
     a = math.radians(ang)
     ca, sa = math.cos(a), math.sin(a)
     sx = s if sx is None else sx
     sy = s if sy is None else sy
-    out = []
-    for x, y in pts:
-        dx, dy = (x - c[0]) * sx, (y - c[1]) * sy
-        out.append((c[0] + dx * ca - dy * sa + off[0], c[1] + dx * sa + dy * ca + off[1]))
-    return out
+    return [(c[0] + ((x - c[0]) * sx) * ca - ((y - c[1]) * sy) * sa + off[0],
+             c[1] + ((x - c[0]) * sx) * sa + ((y - c[1]) * sy) * ca + off[1]) for x, y in pts]
 
 
 def mirror_x(pts, cx=50):
     return [(2 * cx - x, y) for x, y in pts]
 
 
-def arc_pts(cx, cy, rx, ry, a0, a1, n=40):
+def arc_pts(cx, cy, rx, ry, a0, a1, n=48):
     return [(cx + rx * math.cos(math.radians(a0 + (a1 - a0) * i / n)),
              cy + ry * math.sin(math.radians(a0 + (a1 - a0) * i / n))) for i in range(n + 1)]
 
 
-def bezier(p0, p1, p2, n=24, p3=None):
+def bez(*p, n=24):
+    """Quadratic (3 pts) or cubic (4 pts) Bezier."""
     out = []
     for i in range(n + 1):
         t = i / n
-        if p3 is None:
-            x = (1 - t) ** 2 * p0[0] + 2 * (1 - t) * t * p1[0] + t * t * p2[0]
-            y = (1 - t) ** 2 * p0[1] + 2 * (1 - t) * t * p1[1] + t * t * p2[1]
+        if len(p) == 3:
+            a, b, c = p
+            out.append(((1 - t) ** 2 * a[0] + 2 * (1 - t) * t * b[0] + t * t * c[0],
+                        (1 - t) ** 2 * a[1] + 2 * (1 - t) * t * b[1] + t * t * c[1]))
         else:
-            x = (1 - t) ** 3 * p0[0] + 3 * (1 - t) ** 2 * t * p1[0] + 3 * (1 - t) * t * t * p2[0] + t ** 3 * p3[0]
-            y = (1 - t) ** 3 * p0[1] + 3 * (1 - t) ** 2 * t * p1[1] + 3 * (1 - t) * t * t * p2[1] + t ** 3 * p3[1]
-        out.append((x, y))
+            a, b, c, d = p
+            out.append(((1 - t) ** 3 * a[0] + 3 * (1 - t) ** 2 * t * b[0] + 3 * (1 - t) * t * t * c[0] + t ** 3 * d[0],
+                        (1 - t) ** 3 * a[1] + 3 * (1 - t) ** 2 * t * b[1] + 3 * (1 - t) * t * t * c[1] + t ** 3 * d[1]))
     return out
 
 
-# ---------------------------------------------------------------- masks
+def ribbon(spine, widths):
+    """Closed outline around a polyline with per-point half widths (tapering shapes)."""
+    n = len(spine)
+    L, R = [], []
+    for i, (x, y) in enumerate(spine):
+        x2, y2 = spine[min(i + 1, n - 1)]
+        x1, y1 = spine[max(i - 1, 0)]
+        dx, dy = x2 - x1, y2 - y1
+        d = math.hypot(dx, dy) or 1
+        nx, ny = -dy / d, dx / d
+        w = widths(i / (n - 1)) if callable(widths) else widths[i]
+        L.append((x + nx * w, y + ny * w))
+        R.append((x - nx * w, y - ny * w))
+    return L + R[::-1]
+
+
+# ================================================================ masks
 def _new():
     return Image.new("L", (S, S), 0)
 
@@ -76,39 +100,46 @@ def _px(pts):
     return [(x * K, y * K) for x, y in pts]
 
 
+def _arr(im):
+    return np.asarray(im, dtype=np.float32) / 255.0
+
+
 def M_poly(pts):
     im = _new()
     ImageDraw.Draw(im).polygon(_px(pts), fill=255)
-    return np.asarray(im, dtype=np.float32) / 255.0
+    return _arr(im)
 
 
-def M_ell(cx, cy, rx, ry=None):
+def M_ell(cx, cy, rx, ry=None, ang=0):
     ry = rx if ry is None else ry
+    if ang:
+        return M_poly(tf(arc_pts(cx, cy, rx, ry, 0, 360, 64), ang=ang, c=(cx, cy)))
     im = _new()
     ImageDraw.Draw(im).ellipse([(cx - rx) * K, (cy - ry) * K, (cx + rx) * K, (cy + ry) * K], fill=255)
-    return np.asarray(im, dtype=np.float32) / 255.0
+    return _arr(im)
 
 
-def M_line(pts, w, round_caps=True):
+def M_line(pts, w, caps=True):
     im = _new()
     d = ImageDraw.Draw(im)
     p = _px(pts)
-    d.line(p, fill=255, width=max(1, int(w * K)), joint="curve")
-    if round_caps:
+    d.line(p, fill=255, width=max(1, int(round(w * K))), joint="curve")
+    if caps:
         r = w * K / 2
         for x, y in (p[0], p[-1]):
             d.ellipse([x - r, y - r, x + r, y + r], fill=255)
-    return np.asarray(im, dtype=np.float32) / 255.0
+    return _arr(im)
 
 
 def M_rect(x0, y0, x1, y1, r=0):
     im = _new()
     ImageDraw.Draw(im).rounded_rectangle([x0 * K, y0 * K, x1 * K, y1 * K], radius=r * K, fill=255)
-    return np.asarray(im, dtype=np.float32) / 255.0
+    return _arr(im)
 
 
-def M_ring(cx, cy, r, w):
-    return clamp01(M_ell(cx, cy, r + w / 2) - M_ell(cx, cy, r - w / 2))
+def M_ring(cx, cy, r, w, ry=None):
+    ry = r if ry is None else ry
+    return clamp01(M_ell(cx, cy, r + w / 2, ry + w / 2) - M_ell(cx, cy, r - w / 2, ry - w / 2))
 
 
 def U(*ms):
@@ -129,34 +160,55 @@ def INT(a, b):
 
 
 def blur(m, r):
+    if r <= 0:
+        return m
     im = Image.fromarray((clamp01(m) * 255).astype(np.uint8))
-    return np.asarray(im.filter(ImageFilter.GaussianBlur(r * K)), dtype=np.float32) / 255.0
+    return _arr(im.filter(ImageFilter.GaussianBlur(r * K)))
+
+
+def blurf(m, r):
+    """float blur for height fields (keeps precision)"""
+    from scipy.ndimage import gaussian_filter
+    return gaussian_filter(m.astype(np.float32), sigma=r * K, mode="constant", truncate=3.0)
 
 
 def dilate(m, r):
     size = max(3, int(r * K) * 2 + 1)
     im = Image.fromarray((clamp01(m) * 255).astype(np.uint8))
-    return np.asarray(im.filter(ImageFilter.MaxFilter(size)), dtype=np.float32) / 255.0
+    return _arr(im.filter(ImageFilter.MaxFilter(size)))
 
 
-# ---------------------------------------------------------------- materials
-MAT = {
-    "steel": ((170, 178, 192), (30, 33, 42), 0.55),
-    "darksteel": ((105, 110, 124), (16, 17, 22), 0.4),
-    "gold": ((250, 200, 90), (95, 50, 10), 0.6),
-    "bronze": ((215, 140, 70), (60, 28, 10), 0.4),
-    "silver": ((210, 218, 232), (60, 66, 82), 0.7),
-    "leather": None,   # tinted from theme
-    "wood": ((170, 118, 70), (55, 32, 16), 0.15),
-    "bone": ((245, 238, 215), (130, 115, 90), 0.3),
-    "stone": ((150, 145, 140), (45, 42, 40), 0.1),
-    "dark": ((70, 62, 60), (14, 12, 12), 0.2),
-    "cloth": None,
-    "gem": None,
-    "glow": None,
+def rotate_mask(m, ang, c=(50, 50)):
+    im = Image.fromarray((clamp01(m) * 255).astype(np.uint8))
+    return _arr(im.rotate(-ang, center=(c[0] * K, c[1] * K), resample=Image.BICUBIC))
+
+
+def noise(rng, cells, octaves=3):
+    out = np.zeros((S, S), np.float32)
+    amp, tot = 1.0, 0.0
+    for o in range(octaves):
+        n = cells * (2 ** o)
+        a = np.random.RandomState(rng.randint(0, 10 ** 6)).rand(n, n).astype(np.float32)
+        a = np.asarray(Image.fromarray((a * 255).astype(np.uint8)).resize((S, S), Image.BICUBIC), np.float32) / 255
+        out += a * amp
+        tot += amp
+        amp *= 0.5
+    return out / tot
+
+
+# ================================================================ materials
+# hi, lo, spec strength, spec power
+METALS = {
+    "steel": ((215, 222, 235), (22, 25, 33), 0.9, 28),
+    "darksteel": ((120, 125, 140), (8, 9, 12), 0.7, 24),
+    "gold": ((255, 214, 120), (80, 38, 6), 0.9, 22),
+    "bronze": ((225, 150, 80), (45, 20, 6), 0.6, 16),
+    "silver": ((240, 245, 255), (70, 76, 92), 1.0, 30),
+    "wood": ((160, 105, 60), (30, 16, 8), 0.12, 8),
+    "bone": ((245, 235, 205), (95, 80, 55), 0.3, 10),
+    "stone": ((150, 142, 132), (28, 25, 24), 0.08, 6),
+    "dark": ((60, 52, 50), (6, 5, 5), 0.25, 12),
 }
-
-YY, XX = np.mgrid[0:S, 0:S].astype(np.float32) / S
 
 
 class Canvas:
@@ -164,203 +216,182 @@ class Canvas:
         self.theme = theme
         self.rng = random.Random(seed)
         self.img = np.zeros((S, S, 3), np.float32)
-        self.sil = np.zeros((S, S), np.float32)   # union of all object parts (for aura)
+        self.sil = np.zeros((S, S), np.float32)
+        self.light = np.array([-0.55, -0.7, 0.55], np.float32)
+        self.light /= np.linalg.norm(self.light)
 
-    # ---------------------------------------------------- compositing
-    def over(self, color_arr, alpha):
+    # ---------------------------------------------------------------- compositing
+    def over(self, color, alpha):
         a = clamp01(alpha)[..., None]
-        self.img = self.img * (1 - a) + color_arr * a
+        c = color if isinstance(color, np.ndarray) else rgb(color)[None, None, :]
+        self.img = self.img * (1 - a) + c * a
 
     def add(self, color, m, k=1.0):
         self.img = self.img + rgb(color)[None, None, :] * (clamp01(m) * k)[..., None]
 
-    # ---------------------------------------------------- backdrop
-    def backdrop(self, glow_center=(50, 48), glow=0.75, embers=26):
-        th = self.theme
-        base = np.array([0.055, 0.045, 0.045], np.float32)
-        d = np.sqrt((XX - glow_center[0] / 100) ** 2 + (YY - glow_center[1] / 100) ** 2)
-        g = np.exp(-(d / 0.33) ** 2) * glow * 0.8
-        g2 = np.exp(-(d / 0.14) ** 2) * glow * 0.45
-        col = rgb(th)
-        self.img = base[None, None, :] + col[None, None, :] * (g * 0.9 + g2)[..., None]
-        # smoky texture
-        noise = np.random.RandomState(self.rng.randint(0, 10**6)).rand(64, 64).astype(np.float32)
-        n = np.asarray(Image.fromarray((noise * 255).astype(np.uint8)).resize((S, S), Image.BICUBIC), np.float32) / 255
-        n = blur(n, 1.2)
-        self.img *= (0.78 + 0.44 * n)[..., None]
-        # embers / motes
-        for _ in range(embers):
-            x, y = self.rng.uniform(8, 92), self.rng.uniform(8, 92)
-            r = self.rng.uniform(0.25, 0.8)
-            m = M_ell(x, y, r)
-            self.add(lighten(th, 0.5), blur(m, r * 0.9), 0.9)
-            self.add(lighten(th, 0.8), m, 0.6)
+    def glow(self, m, color, k=1.0, r=1.6, core=None):
+        """emissive line/shape: wide soft halo + tight halo + hot core"""
+        self.add(color, blur(m, r * 2.6), 0.7 * k)
+        self.add(color, blur(m, r * 0.7), 0.9 * k)
+        self.add(core or lighten(color, 0.7), m, 0.9 * k)
 
-    # ---------------------------------------------------- shaded part
-    def part(self, m, mat="steel", color=None, light=(-0.6, -0.8), outline=0.9, bevel=1.0,
-             spec=None, tex=0.0, grad=1.0, shadow=True):
+    # ---------------------------------------------------------------- backdrop
+    def backdrop(self, glow=1.0, center=(50, 50), smoke=True, embers=True, tint=None):
+        th = tint or self.theme
+        rng = self.rng
+        col = rgb(sat(th, 1.2))
+        d = np.sqrt((XX - center[0]) ** 2 + (YY - center[1]) ** 2) / 100
+        base = np.array([0.035, 0.028, 0.03], np.float32)
+        wide = np.exp(-(d / 0.42) ** 2) * 0.55 * glow
+        core = np.exp(-(d / 0.2) ** 2) * 0.55 * glow
+        self.img = base[None, None, :] + col[None, None, :] * (wide + core)[..., None]
+        if smoke:
+            n = noise(rng, 4, 4)
+            n2 = noise(rng, 3, 3)
+            wisps = clamp01((n - 0.45) * 3.0) * np.exp(-(d / 0.55) ** 2)
+            self.img += (rgb(lighten(th, 0.15)) * 0.5)[None, None, :] * wisps[..., None] * glow
+            self.img *= (0.65 + 0.6 * n2)[..., None]
+        if embers:
+            for _ in range(22):
+                x, y = rng.uniform(6, 94), rng.uniform(6, 94)
+                l, w = rng.uniform(0.5, 2.2), rng.uniform(0.18, 0.4)
+                m = M_line([(x, y), (x + rng.uniform(-0.6, 0.6), y - l)], w)
+                self.add(lighten(th, 0.45), blur(m, 0.5), 0.8)
+                self.add(lighten(th, 0.75), m, 0.7)
+
+    # ---------------------------------------------------------------- lit part
+    def part(self, m, mat="steel", color=None, round=None, outline=0.8, rim=0.9, spec=None,
+             tex=0.0, streak=0.0, shadow=0.45, emissive=0.0, flat=0.0):
+        """Shade mask m as a rounded volume.
+        mat: metal key, or leather / cloth / gem / energy (tinted by color or theme)."""
         th = self.theme
-        if mat == "leather":
-            c = color or mix(th, (92, 54, 30), 0.25)
-            hi, lo, sp = lighten(c, 0.35), darken(c, 0.58), 0.12
+        if mat in METALS:
+            hi, lo, sp, pw = METALS[mat]
+            tint = color if color is not None else th
+            k = 0.4 if color is not None else 0.1
+            hi, lo = mix(hi, tint, k), mix(lo, tint, k)
+        elif mat == "leather":
+            c = sat(color or mix(th, (90, 52, 28), 0.4), 1.25)
+            hi, lo, sp, pw = lighten(c, 0.45), darken(c, 0.7), 0.2, 8
         elif mat == "cloth":
             c = color or th
-            hi, lo, sp = lighten(c, 0.15), darken(c, 0.8), 0.05
+            c = sat(c, 1.2)
+            hi, lo, sp, pw = lighten(c, 0.35), darken(c, 0.75), 0.06, 6
         elif mat == "gem":
             c = color or th
-            hi, lo, sp = lighten(c, 0.45), darken(c, 0.6), 0.7
-        elif mat == "glow":
+            hi, lo, sp, pw = lighten(sat(c, 1.3), 0.5), darken(sat(c, 1.4), 0.7), 1.3, 40
+            emissive = max(emissive, 0.25)
+        elif mat == "energy":
             c = color or th
-            hi, lo, sp = lighten(c, 0.6), c, 0.2
+            hi, lo, sp, pw = lighten(c, 0.8), lighten(c, 0.1), 0.2, 8
+            emissive = max(emissive, 0.6)
         else:
-            hi, lo, sp = MAT[mat]
-            tint = color if color is not None else th
-            k = 0.35 if color is not None else 0.12   # metals pick up the aura colour
-            hi, lo = mix(hi, tint, k), mix(lo, tint, k)
+            raise KeyError(mat)
         if spec is not None:
             sp = spec
-        ys, xs = np.nonzero(m > 0.5)
-        if len(xs) == 0:
+        if m.max() <= 0.01:
             return
-        x0, x1, y0, y1 = xs.min() / S, xs.max() / S, ys.min() / S, ys.max() / S
-        lx, ly = light
-        t = ((XX - x0) / max(x1 - x0, 1e-3) * -lx + (YY - y0) / max(y1 - y0, 1e-3) * -ly)
-        t = clamp01(t / (abs(lx) + abs(ly)))
-        t = 0.5 + (t - 0.5) * grad
+        # height field from the distance to the edge: rounded rim, then (optionally) a
+        # plateau.  round=None -> the whole part is one smooth curved volume.
+        from scipy.ndimage import distance_transform_edt
+        d = distance_transform_edt(m > 0.5).astype(np.float32) / K
+        dmax = float(d.max()) or 1.0
+        rr = dmax * 0.95 if round is None else min(round, dmax * 0.95)
+        rr = max(rr, 0.25)
+        h = np.sqrt(clamp01(d / rr)) * rr
+        h = blurf(h, 0.18)
+        gy, gx = np.gradient(h * K)
+        nx, ny = -gx * 1.3, -gy * 1.3
+        nz = np.ones_like(nx)
+        inv = 1 / np.sqrt(nx * nx + ny * ny + nz * nz)
+        nx, ny, nz = nx * inv, ny * inv, nz * inv
+        L = self.light
+        diff = clamp01(nx * L[0] + ny * L[1] + nz * L[2])
+        diff = diff * (1 - flat) + 0.7 * flat
+        # large-scale top-left -> bottom-right gradient for form
+        ys, xs = np.nonzero(m > 0.5)
+        if len(xs):
+            x0, x1, y0, y1 = xs.min(), xs.max(), ys.min(), ys.max()
+            g = clamp01(((XX * K - x0) / max(x1 - x0, 1) * 0.45 + (YY * K - y0) / max(y1 - y0, 1) * 0.55))
+            diff = diff * (1.15 - 0.55 * g)
+        diff = clamp01(diff)
         hi_a, lo_a = rgb(hi), rgb(lo)
-        col = hi_a[None, None, :] * (1 - t[..., None]) + lo_a[None, None, :] * t[..., None]
-        # bevel from blurred mask gradient
-        mb = blur(m, 1.4)
-        gy, gx = np.gradient(mb)
-        sh = -(gx * lx + gy * ly) * S / 14.0 * bevel
-        col = col + np.clip(sh, 0, 1)[..., None] * 0.3 - np.clip(-sh, 0, 1)[..., None] * 0.35
-        # specular band
-        if sp > 0:
-            band = np.exp(-((t - 0.3) / 0.045) ** 2) * sp * 0.5
-            col = col + band[..., None]
+        t = diff[..., None] ** 1.1
+        col = lo_a[None, None, :] * (1 - t) + hi_a[None, None, :] * t
+        # specular (Blinn)
+        H = np.array([L[0], L[1], L[2] + 1.0], np.float32)
+        H /= np.linalg.norm(H)
+        sdot = clamp01(nx * H[0] + ny * H[1] + nz * H[2])
+        col += (sdot ** pw * sp)[..., None] * rgb(lighten(hi, 0.6))[None, None, :]
+        # back / rim light from lower-right in the aura colour
+        if rim > 0:
+            r = clamp01(nx * 0.65 + ny * 0.55 - nz * 0.1)
+            col += (r ** 1.6 * rim)[..., None] * rgb(lighten(sat(th, 1.3), 0.25))[None, None, :]
         if tex > 0:
-            nz = np.random.RandomState(self.rng.randint(0, 10**6)).rand(S // 8, S // 8).astype(np.float32)
-            nz = np.asarray(Image.fromarray((nz * 255).astype(np.uint8)).resize((S, S), Image.BICUBIC), np.float32) / 255
-            col = col * (1 - tex + 2 * tex * nz)[..., None]
-        if shadow:
-            sm = blur(np.roll(np.roll(m, int(1.6 * K), 0), int(1.2 * K), 1), 1.5)
-            self.over(np.zeros_like(col), sm * 0.55)
+            n = noise(self.rng, 48, 2)
+            col *= (1 - tex + 2 * tex * n)[..., None]
+        if streak > 0:  # brushed metal
+            n = np.random.RandomState(self.rng.randint(0, 10 ** 6)).rand(S // 64, S).astype(np.float32)
+            n = np.asarray(Image.fromarray((n * 255).astype(np.uint8)).resize((S, S), Image.BILINEAR), np.float32) / 255
+            col *= (1 - streak + 2 * streak * n)[..., None]
+        if emissive > 0:
+            col += rgb(lighten(hi, 0.2))[None, None, :] * emissive * (h / (h.max() + 1e-6))[..., None]
+        if shadow > 0:
+            sm = blur(np.roll(np.roll(m, int(1.0 * K), 0), int(0.8 * K), 1), 1.2)
+            self.over((0, 0, 0), sm * shadow)
         if outline > 0:
-            ol = dilate(m, 0.55)
-            self.over(np.full_like(col, 0.03), ol * outline)
+            self.over((4, 3, 3), dilate(m, 0.28) * outline)
         self.over(col, m)
         self.sil = np.maximum(self.sil, m)
 
-    def glowline(self, m, color, core=(255, 255, 255), r=1.6, k=1.0):
-        self.add(color, blur(m, r * 2.2), 0.9 * k)
-        self.add(color, blur(m, r * 0.8), 1.0 * k)
-        self.add(core, m, 0.8 * k)
+    def gem(self, cx, cy, r, color, ry=None):
+        ry = r if ry is None else ry
+        m = M_ell(cx, cy, r, ry)
+        self.part(m, "gem", color=color, round=r * 0.6, outline=0.9, rim=0.3, shadow=0.3)
+        self.add(lighten(color, 0.3), blur(m, r * 0.8), 0.45)
+        self.add((255, 255, 255), M_ell(cx - r * 0.35, cy - ry * 0.4, r * 0.28, ry * 0.2), 0.85)
 
-    def aura(self, r=3.2, k=0.8, color=None):
-        c = color or lighten(self.theme, 0.2)
-        g = blur(dilate(self.sil, 0.6), r) - self.sil * 0.9
-        self.add(c, clamp01(g), k)
+    def engrave(self, pts, w=0.35, k=0.7):
+        """incised line: dark groove with a light lip underneath"""
+        self.over((0, 0, 0), M_line(pts, w) * k)
+        self.add((255, 245, 220), M_line([(x + 0.25, y + 0.3) for x, y in pts], w * 0.6), 0.18 * k)
 
-    def rim(self, k=0.55, color=None):
-        """Colored rim light on silhouette edges facing away from key light."""
-        c = color or lighten(self.theme, 0.35)
-        mb = blur(self.sil, 0.9)
-        gy, gx = np.gradient(mb)
-        rimm = clamp01((gx * 0.7 + gy * 0.3) * S / 7) * self.sil
-        self.add(c, rimm, k)
+    def stitches(self, pts, every=2.2, w=0.35, color=(230, 210, 170)):
+        acc = 0
+        marks = []
+        for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
+            d = math.hypot(x2 - x1, y2 - y1)
+            steps = max(1, int(d / 0.4))
+            for i in range(steps):
+                acc += d / steps
+                if acc >= every:
+                    acc = 0
+                    t = i / steps
+                    x, y = x1 + (x2 - x1) * t, y1 + (y2 - y1) * t
+                    dx, dy = (x2 - x1) / (d or 1), (y2 - y1) / (d or 1)
+                    marks.append(M_line([(x - dx * 0.5, y - dy * 0.5), (x + dx * 0.5, y + dy * 0.5)], w))
+        if marks:
+            self.over(color, U(*marks) * 0.8)
 
-    # ---------------------------------------------------- finishing
-    def finish(self, frame=None):
+    def aura(self, k=0.6, r=2.4, color=None):
+        c = color or lighten(sat(self.theme, 1.3), 0.25)
+        g = clamp01(blur(dilate(self.sil, 0.4), r) - self.sil)
+        self.add(c, g, k)
+
+    # ---------------------------------------------------------------- finishing
+    def finish(self):
         img = self.img
-        # vignette
-        d = np.sqrt((XX - 0.5) ** 2 + (YY - 0.5) ** 2)
-        img = img * (1 - clamp01((d - 0.38) / 0.5) * 0.75)[..., None]
-        # tone map: linear up to 0.7, soft shoulder above
+        d = np.sqrt((XX - 50) ** 2 + (YY - 50) ** 2) / 100
+        img = img * (1 - clamp01((d - 0.36) / 0.4) * 0.8)[..., None]
         img = np.clip(img, 0, None)
-        hi = img > 0.7
-        img[hi] = 0.7 + 0.3 * (1 - np.exp(-(img[hi] - 0.7) / 0.3))
+        hi = img > 0.72
+        img[hi] = 0.72 + 0.28 * (1 - np.exp(-(img[hi] - 0.72) / 0.28))
         img = clamp01(img)
-        # frame: dark bevelled border with bronze inner line
-        fr = frame or (150, 110, 60)
-        b = 2.2 / 100
-        edge = (XX < b) | (XX > 1 - b) | (YY < b) | (YY > 1 - b)
-        img[edge] = img[edge] * 0.15 + np.array([0.04, 0.035, 0.03]) * 0.85
-        inner = ((np.abs(XX - b) < 0.0035) | (np.abs(XX - (1 - b)) < 0.0035) |
-                 (np.abs(YY - b) < 0.0035) | (np.abs(YY - (1 - b)) < 0.0035))
-        inner &= (XX > b - 0.004) & (XX < 1 - b + 0.004) & (YY > b - 0.004) & (YY < 1 - b + 0.004)
-        img[inner] = rgb(fr)
+        # thin tile frame: black edge + faint bronze hairline
+        b = 1.6
+        edge = (XX < b) | (XX > 100 - b) | (YY < b) | (YY > 100 - b)
+        img[edge] = np.array([0.03, 0.025, 0.02])
+        hair = ((np.abs(XX - b) < 0.35) | (np.abs(XX - (100 - b)) < 0.35) | (np.abs(YY - b) < 0.35) | (np.abs(YY - (100 - b)) < 0.35)) & ~edge
+        img[hair] = img[hair] * 0.3 + rgb((150, 110, 55)) * 0.7
         im = Image.fromarray((img * 255).astype(np.uint8), "RGB")
         return im.resize((OUT, OUT), Image.LANCZOS)
-
-
-# ---------------------------------------------------------------- FX helpers
-def fx_flames(cv, base_y, x0, x1, height, rng, n=7, color=(255, 120, 30)):
-    for i in range(n):
-        x = x0 + (x1 - x0) * (i + rng.uniform(0.1, 0.9)) / n
-        h = height * rng.uniform(0.6, 1.1)
-        w = (x1 - x0) / n * rng.uniform(0.7, 1.3)
-        lean = rng.uniform(-4, 4)
-        pts = bezier((x - w, base_y), (x - w * 0.6, base_y - h * 0.55), (x + lean, base_y - h), 12) + \
-            bezier((x + lean, base_y - h), (x + w * 0.6, base_y - h * 0.55), (x + w, base_y), 12)
-        m = M_poly(pts)
-        cv.add(color, blur(m, 2.2), 0.8)
-        cv.add(color, m, 0.7)
-        inner = M_poly(tf(pts, s=0.55, c=(x, base_y)))
-        cv.add((255, 230, 140), blur(inner, 0.8), 0.9)
-
-
-def fx_bolt(cv, p0, p1, rng, color=(120, 190, 255), segs=7, jitter=5, w=0.9, branches=1):
-    pts = [p0]
-    for i in range(1, segs):
-        t = i / segs
-        pts.append((p0[0] + (p1[0] - p0[0]) * t + rng.uniform(-jitter, jitter),
-                    p0[1] + (p1[1] - p0[1]) * t + rng.uniform(-jitter, jitter)))
-    pts.append(p1)
-    cv.glowline(M_line(pts, w), color, r=1.4)
-    for _ in range(branches):
-        j = rng.randint(1, segs - 2)
-        q = pts[j]
-        end = (q[0] + rng.uniform(-14, 14), q[1] + rng.uniform(4, 14))
-        cv.glowline(M_line([q, ((q[0] + end[0]) / 2 + rng.uniform(-3, 3), (q[1] + end[1]) / 2), end], w * 0.6), color, r=1.0, k=0.8)
-
-
-def fx_sparkles(cv, rng, n=6, color=(255, 240, 200), area=(15, 15, 85, 85), size=(1.5, 3.5)):
-    for _ in range(n):
-        x, y = rng.uniform(area[0], area[2]), rng.uniform(area[1], area[3])
-        s = rng.uniform(*size)
-        star = M_poly([(x, y - s), (x + s * 0.18, y - s * 0.18), (x + s, y), (x + s * 0.18, y + s * 0.18),
-                       (x, y + s), (x - s * 0.18, y + s * 0.18), (x - s, y), (x - s * 0.18, y - s * 0.18)])
-        cv.add(color, blur(star, s * 0.35), 0.8)
-        cv.add((255, 255, 255), star, 0.9)
-
-
-def fx_drips(cv, rng, pts, color=(110, 220, 70)):
-    for x, y in pts:
-        l = rng.uniform(4, 8)
-        m = U(M_line([(x, y), (x, y + l)], 1.1), M_ell(x, y + l + 0.8, 1.4, 1.8))
-        cv.part(m, "gem", color=color, outline=0.6, spec=0.8)
-        cv.add(color, blur(m, 1.4), 0.5)
-
-
-def fx_snow(cv, cx, cy, r, color=(200, 235, 255), w=0.9):
-    ms = []
-    for k in range(6):
-        a = math.radians(k * 60 - 90)
-        ex, ey = cx + r * math.cos(a), cy + r * math.sin(a)
-        ms.append(M_line([(cx, cy), (ex, ey)], w))
-        for f in (0.55,):
-            bx, by = cx + r * f * math.cos(a), cy + r * f * math.sin(a)
-            for s in (-1, 1):
-                b = a + s * math.radians(40)
-                ms.append(M_line([(bx, by), (bx + r * 0.3 * math.cos(b), by + r * 0.3 * math.sin(b))], w * 0.8))
-    cv.glowline(U(*ms), color, r=1.0, k=0.9)
-
-
-def fx_swirl(cv, cx, cy, r, color, turns=1.6, w=1.0, k=0.9):
-    pts = []
-    for i in range(80):
-        t = i / 79
-        a = t * turns * 2 * math.pi
-        rr = r * (0.2 + 0.8 * t)
-        pts.append((cx + rr * math.cos(a), cy + rr * math.sin(a)))
-    cv.glowline(M_line(pts, w), color, r=1.2, k=k)
