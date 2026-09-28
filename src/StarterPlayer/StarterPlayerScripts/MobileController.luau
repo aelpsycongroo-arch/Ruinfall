@@ -289,8 +289,13 @@ local function buildGui()
 	Label({ Name = "Caption", Text = "ATTACK", Font = FONTS.Title, TextSize = 12, TextColor3 = MEDIEVAL.TrimBright, TextXAlignment = Enum.TextXAlignment.Center, AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -8), Size = UDim2.new(1, 0, 0, 14), ZIndex = 3, Parent = attack.Frame })
 	buttons.Attack = attack
 
-	-- Q / E / R arc around the attack button
-	local offsets = { Q = Vector2.new(-122, 12), E = Vector2.new(-96, -88), R = Vector2.new(-10, -124), SPACE = Vector2.new(-196, -110), M2 = Vector2.new(-192, -40) }
+	-- Q / SPACE / E / R on an even arc around the attack button (36 deg apart, 136 px out),
+	-- boots, shop and swap on an outer ring so no two buttons touch
+	local function onArc(degrees, radius)
+		local a = math.rad(degrees)
+		return Vector2.new(math.cos(a) * radius, math.sin(a) * radius)
+	end
+	local offsets = { Q = onArc(180, 136), SPACE = onArc(216, 136), E = onArc(252, 136), R = onArc(288, 136), M2 = Vector2.new(-214, -40) }
 	for _, key in ipairs(SKILL_KEYS) do
 		local entry = roundButton(key, key == "M2" and 62 or 72, attackCenter + offsets[key], cluster)
 		if key == "Q" then
@@ -306,14 +311,14 @@ local function buildGui()
 	end
 
 	-- utility buttons
-	local swap = roundButton("Swap", 40, attackCenter + Vector2.new(-138, -168), cluster)
+	local swap = roundButton("Swap", 40, attackCenter + Vector2.new(-190, -150), cluster)
 	Label({ Text = "SWAP", Font = FONTS.Title, TextSize = 10, TextColor3 = MEDIEVAL.TrimBright, TextXAlignment = Enum.TextXAlignment.Center, Size = UDim2.fromScale(1, 1), ZIndex = 2, Parent = swap.Frame })
 	buttons.Swap = swap
-	local shop = roundButton("Shop", 52, attackCenter + Vector2.new(-218, 44), cluster)
+	local shop = roundButton("Shop", 52, attackCenter + Vector2.new(-232, 50), cluster)
 	shop.Frame.BackgroundColor3 = Color3.fromRGB(120, 88, 30)
 	shop.Caption = Label({ Text = "SHOP", Font = FONTS.Title, TextSize = 12, TextColor3 = MEDIEVAL.TrimBright, TextXAlignment = Enum.TextXAlignment.Center, Size = UDim2.fromScale(1, 1), ZIndex = 2, Parent = shop.Frame })
 	buttons.Shop = shop
-	local cancel = roundButton("Cancel", 60, attackCenter + Vector2.new(-40, -205), cluster)
+	local cancel = roundButton("Cancel", 60, attackCenter + Vector2.new(0, -215), cluster)
 	cancel.Frame.BackgroundColor3 = Color3.fromRGB(110, 25, 25)
 	cancel.Frame.Visible = false
 	Label({ Text = "CANCEL", Font = FONTS.Title, TextSize = 11, TextColor3 = Color3.fromRGB(255, 220, 210), TextXAlignment = Enum.TextXAlignment.Center, Size = UDim2.fromScale(1, 1), ZIndex = 2, Parent = cancel.Frame })

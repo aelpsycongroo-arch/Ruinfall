@@ -110,8 +110,70 @@ local function updateSide(side, teamState, state)
 	end
 end
 
+-- 4 / 6 teams: every plaque sits in ONE horizontal row across the top (the extra plaques
+-- used to stack under the main one): [teams 3-4] [teams 1-2] [teams 5-6]. 2 teams: the main
+-- plaque alone, as designed.
+local PLAQUE_ASPECT = 3.78
+local ROW_GAP = 0.012
+function Scoreboard:ArrangeRow(count)
+	if self.RowCount == count then
+		return
+	end
+	self.RowCount = count
+	local main = self.Group
+	local row = self.Plaques[2] and self.Plaques[2].Frame.Parent
+	if not row or row == main.Parent then
+		return
+	end
+	self.Home = self.Home or { Parent = main.Parent, Position = main.Position, Size = main.Size, AnchorPoint = main.AnchorPoint, LayoutOrder = main.LayoutOrder }
+	self.RowHome = self.RowHome or { Position = row.Position, Size = row.Size, AnchorPoint = row.AnchorPoint }
+	local layout = row:FindFirstChildOfClass("UIListLayout")
+	local aspect = row:FindFirstChildOfClass("UIAspectRatioConstraint")
+	if count <= 1 then
+		main.Parent = self.Home.Parent
+		main.Position, main.Size, main.AnchorPoint, main.LayoutOrder = self.Home.Position, self.Home.Size, self.Home.AnchorPoint, self.Home.LayoutOrder
+		if self.MainScale then
+			self.MainScale.Parent = main
+		end
+		row.Position, row.Size, row.AnchorPoint = self.RowHome.Position, self.RowHome.Size, self.RowHome.AnchorPoint
+		return
+	end
+	-- the row carries the HUD-size scale for all plaques; the main plaque's own one would double it
+	self.MainScale = self.MainScale or main:FindFirstChild("UserHudScale")
+	if self.MainScale then
+		self.MainScale.Parent = nil
+	end
+	local width = math.min(0.56, count * 0.25)
+	row.AnchorPoint = Vector2.new(0.5, 0)
+	row.Position = UDim2.fromScale(0.5, 0.0022)
+	row.Size = UDim2.fromScale(width, 0.2)
+	if aspect then
+		aspect.AspectRatio = PLAQUE_ASPECT * count / (1 - ROW_GAP * (count - 1))
+	end
+	if layout then
+		layout.FillDirection = Enum.FillDirection.Horizontal
+		layout.SortOrder = Enum.SortOrder.LayoutOrder
+		layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+		layout.VerticalAlignment = Enum.VerticalAlignment.Top
+		layout.Padding = UDim.new(ROW_GAP, 0)
+	end
+	local plaqueWidth = (1 - ROW_GAP * (count - 1)) / count
+	main.Parent = row
+	main.AnchorPoint = Vector2.zero
+	main.Position = UDim2.new()
+	main.Size = UDim2.fromScale(plaqueWidth, 1)
+	main.LayoutOrder = 2
+	for index = 2, #self.Plaques do
+		local frame = self.Plaques[index].Frame
+		frame.Size = UDim2.fromScale(plaqueWidth, 1)
+		frame.LayoutOrder = index == 2 and 1 or index + 1
+	end
+end
+
 function Scoreboard:Update(state)
 	local teams = state.Teams or {}
+	local shown = math.clamp(math.ceil(#teams / 2), 1, #self.Plaques)
+	self:ArrangeRow(shown)
 	for p, plaque in ipairs(self.Plaques) do
 		local first = 2 * p - 1
 		if p > 1 then

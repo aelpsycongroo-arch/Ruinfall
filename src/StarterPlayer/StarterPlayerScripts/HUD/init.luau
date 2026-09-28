@@ -210,8 +210,9 @@ function HUD:SetVisible(visible)
 	self.Gui.Enabled = visible
 end
 
--- Touch devices: the mobile action buttons replace the ability bar; the player panel moves to
--- the top centre under the scoreboard so both bottom corners stay free for thumbs.
+-- Touch devices: the mobile action buttons replace the ability bar, and the portrait / health
+-- panel is hidden so it never blocks the view (health + mana show on the hero's overhead bar,
+-- gold on the SHOP button).
 function HUD:SetMobileLayout(enabled)
 	if self.MobileLayout == enabled then
 		return
@@ -225,12 +226,12 @@ function HUD:SetMobileLayout(enabled)
 				d.Visible = not enabled
 			end
 		end
-		if not SHOW_CHARACTER_PANEL then
-			-- touch: the mobile buttons replace the ability bar and the character panel is hidden,
-			-- so the whole strip goes away (gold shows on the mobile SHOP button)
+		if enabled or not SHOW_CHARACTER_PANEL then
+			-- touch: the whole strip goes away
 			bottom.Visible = not enabled
 			return
 		end
+		bottom.Visible = true
 		if enabled then
 			self.DesktopBottom = self.DesktopBottom or { AnchorPoint = bottom.AnchorPoint, Position = bottom.Position }
 			bottom.AnchorPoint = Vector2.new(0.25, 0)
@@ -243,14 +244,7 @@ function HUD:SetMobileLayout(enabled)
 	end
 	local info = self.PlayerInfo.Group
 	self.AbilityBar.Group.Visible = not enabled
-	if enabled then
-		self.DesktopInfo = self.DesktopInfo or { AnchorPoint = info.AnchorPoint, Position = info.Position }
-		info.AnchorPoint = Vector2.new(0.5, 0)
-		info.Position = UDim2.fromScale(0.5, 0.13)
-	elseif self.DesktopInfo then
-		info.AnchorPoint = self.DesktopInfo.AnchorPoint
-		info.Position = self.DesktopInfo.Position
-	end
+	info.Visible = not enabled
 end
 
 -- replicated match state changed
