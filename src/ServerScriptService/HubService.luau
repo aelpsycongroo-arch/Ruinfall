@@ -18,8 +18,8 @@ local TeleportService = game:GetService("TeleportService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Constants = require(Shared:WaitForChild("Constants"))
-local ClassDefinitions = require(Shared:WaitForChild("ClassDefinitions"))
 local Net = require(script.Parent:WaitForChild("Net"))
+local LeaderboardService = require(script.Parent:WaitForChild("LeaderboardService"))
 
 -- Constants
 -- One gate per game mode. The CraterArena gate runs the classic team battle (2 / 4 / 6
@@ -54,6 +54,8 @@ local lastRequest = setmetatable({}, { __mode = "k" })
 local connections = {}
 local active = false
 local parkedMap = nil -- the saved arena preview, hidden while the hub runs
+local leaderboardLabels = {} -- [board key] = { Status = TextLabel, Rows = { TextLabel } }
+local LEADERBOARD_REFRESH = 60
 
 -- Role --------------------------------------------------------------------------------
 -- "Match" on reserved servers (teleported lobbies), "Hub" everywhere else.
@@ -234,14 +236,21 @@ local function buildHall()
 		end
 	end
 	local centerZ = 6
-	part({ Name = "MosaicBase", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.12, 40, 40), CFrame = CFrame.new(0, y + 0.07, centerZ) * CFrame.Angles(0, 0, math.rad(90)), Color = Color3.fromRGB(40, 34, 44), Material = Enum.Material.Marble })
-	for _, r in ipairs({ 19.4, 15, 10 }) do
-		neon({ Name = "MosaicRing", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.14, r * 2, r * 2), CFrame = CFrame.new(0, y + 0.08, centerZ) * CFrame.Angles(0, 0, math.rad(90)), Color = GOLD, Transparency = 0.2 })
-		part({ Name = "MosaicRingInner", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.15, r * 2 - 0.7, r * 2 - 0.7), CFrame = CFrame.new(0, y + 0.085, centerZ) * CFrame.Angles(0, 0, math.rad(90)), Color = Color3.fromRGB(40, 34, 44), Material = Enum.Material.Marble })
+	-- one flat base disc, then gold ring outlines made of thin segments laid ON it (no stacked
+	-- overlapping discs -> no flicker), then the compass rays on top
+	part({ Name = "MosaicBase", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.1, 42, 42), CFrame = CFrame.new(0, y + 0.1, centerZ) * CFrame.Angles(0, 0, math.rad(90)), Color = Color3.fromRGB(40, 34, 44), Material = Enum.Material.Marble })
+	for _, r in ipairs({ 20, 15.5, 11 }) do
+		local segments = 48
+		for index = 1, segments do
+			local a0, a1 = (index - 1) / segments * math.pi * 2, index / segments * math.pi * 2
+			local p0 = Vector3.new(math.cos(a0) * r, y + 0.17, centerZ + math.sin(a0) * r)
+			local p1 = Vector3.new(math.cos(a1) * r, y + 0.17, centerZ + math.sin(a1) * r)
+			neon({ Name = "MosaicRing", Size = Vector3.new(0.5, 0.04, (p1 - p0).Magnitude + 0.05), CFrame = CFrame.lookAt((p0 + p1) / 2, p1), Color = GOLD, Transparency = 0.15 })
+		end
 	end
 	for index = 0, 7 do -- compass star
 		local long = index % 2 == 0 and 19 or 12
-		part({ Name = "MosaicRay", Size = Vector3.new(index % 2 == 0 and 1.6 or 1, 0.16, long), CFrame = CFrame.new(0, y + 0.1, centerZ) * CFrame.Angles(0, math.rad(index * 45), 0) * CFrame.new(0, 0, -long / 2), Color = index % 2 == 0 and GOLD or Color3.fromRGB(150, 120, 190), Material = Enum.Material.Metal })
+		part({ Name = "MosaicRay", Size = Vector3.new(index % 2 == 0 and 1.6 or 1, 0.05, long), CFrame = CFrame.new(0, y + 0.19, centerZ) * CFrame.Angles(0, math.rad(index * 45), 0) * CFrame.new(0, 0, -long / 2), Color = index % 2 == 0 and GOLD or Color3.fromRGB(150, 120, 190), Material = Enum.Material.Metal })
 	end
 
 	-- Walls: dressed stone with pilasters, a dado of dark stone and a cornice ------------------
@@ -351,37 +360,6 @@ local function buildHall()
 		{ Text = "Choose your battle", Position = UDim2.fromScale(0.1, 0.64), Size = UDim2.fromScale(0.8, 0.3), Font = Enum.Font.Merriweather, Color = Color3.fromRGB(230, 210, 180) },
 	})
 
-	-- Class banners along the side walls (between the windows) ----------------------------------
-	for index, classKey in ipairs(ClassDefinitions.Order) do
-		local classDef = ClassDefinitions.Get(classKey)
-		local side = index % 2 == 1 and -1 or 1
-		local z = -42 + (index - 1) * 21
-		local banner = part({ Name = "Banner_" .. classKey, Size = Vector3.new(0.3, 12, 6), Position = Vector3.new(side * (width / 2 - 0.9), y + 12, z), Color = classDef.Color:Lerp(Color3.new(0, 0, 0), 0.35), Material = Enum.Material.Fabric, CanCollide = false })
-		local gui = Instance.new("SurfaceGui")
-		gui.Face = side < 0 and Enum.NormalId.Right or Enum.NormalId.Left
-		gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-		gui.PixelsPerStud = 40
-		gui.LightInfluence = 0.3
-		gui.Parent = banner
-		local image = Instance.new("ImageLabel")
-		image.BackgroundTransparency = 1
-		image.Image = classDef.IconImage or ""
-		image.Size = UDim2.fromScale(0.9, 0.45)
-		image.Position = UDim2.fromScale(0.05, 0.12)
-		image.ScaleType = Enum.ScaleType.Fit
-		image.Parent = gui
-		local name = Instance.new("TextLabel")
-		name.BackgroundTransparency = 1
-		name.Text = string.upper(classDef.DisplayName)
-		name.Font = Enum.Font.Fondamento
-		name.TextScaled = true
-		name.TextColor3 = Color3.fromRGB(255, 225, 160)
-		name.Size = UDim2.fromScale(0.9, 0.12)
-		name.Position = UDim2.fromScale(0.05, 0.62)
-		name.Parent = gui
-		part({ Name = "BannerRod", Size = Vector3.new(0.5, 0.5, 7), Position = Vector3.new(side * (width / 2 - 1), y + 18.2, z), Color = GOLD, Material = Enum.Material.Metal, CanCollide = false })
-	end
-
 	-- Mode gates: grand arches on the back wall ------------------------------------------------
 	local gateX = { -30, 30 }
 	for id = 1, LOBBY_COUNT do
@@ -420,26 +398,20 @@ local function buildHall()
 		glowLight.Brightness = 2
 		glowLight.Parent = portal
 		keystone:SetAttribute("Gate", id)
-		-- themed dressing: embers and rocks for the crater, floating storm shards for the expanse
-		if id == 1 then
-			for index = 1, 5 do
-				local side = index % 2 == 0 and -1 or 1
-				part({ Name = "CraterRock", Shape = Enum.PartType.Ball, Size = Vector3.new(2 + index % 3, 1.6 + index % 2, 2 + index % 3), Position = Vector3.new(x + side * (11 + index), y + 0.8, z + 4 + index), Color = Color3.fromRGB(70, 56, 48), Material = Enum.Material.Basalt })
-			end
-			brazier(Vector3.new(x - 13, y, z + 8), Color3.fromRGB(255, 130, 50))
-			brazier(Vector3.new(x + 13, y, z + 8), Color3.fromRGB(255, 130, 50))
-		else
-			for index = 1, 6 do
-				local side = index % 2 == 0 and -1 or 1
-				neon({ Name = "StormShard", Size = Vector3.new(0.9, 3, 0.9), CFrame = CFrame.new(x + side * (12 + index * 0.6), y + 5 + index * 2.4, z + 2) * CFrame.Angles(0.4 * side, index, 0.3), Color = color, Transparency = 0.15 })
-			end
-			brazier(Vector3.new(x - 13, y, z + 8), color)
-			brazier(Vector3.new(x + 13, y, z + 8), color)
+		-- glowing rods floating beside the portal (ember for the crater, storm for the expanse)
+		local rodColor = id == 1 and Color3.fromRGB(255, 140, 60) or color
+		for index = 1, 6 do
+			local side = index % 2 == 0 and -1 or 1
+			neon({ Name = "GateRod", Size = Vector3.new(0.9, 3, 0.9), CFrame = CFrame.new(x + side * (12.5 + index * 0.6), y + 5 + index * 2.4, z + 2) * CFrame.Angles(0.4 * side, index, 0.3), Color = rodColor, Transparency = 0.15 })
 		end
-		-- carpet runner from the fountain to the gate
-		local runnerA = Vector3.new(x * 0.25, y + 0.14, centerZ - 11)
-		local runnerB = Vector3.new(x, y + 0.14, z + 9)
-		part({ Name = "Runner", Size = Vector3.new(7, 0.14, (runnerB - runnerA).Magnitude), CFrame = CFrame.lookAt((runnerA + runnerB) / 2, runnerB), Color = color:Lerp(Color3.new(0.1, 0.05, 0.05), 0.55), Material = Enum.Material.Fabric, CanCollide = false })
+		-- braziers stand on the floor OUTSIDE the stepped dais (the dais spans x +-13, z-3 .. z+9)
+		brazier(Vector3.new(x - 16.5, y, z + 12), rodColor)
+		brazier(Vector3.new(x + 16.5, y, z + 12), rodColor)
+		-- carpet runner from the edge of the floor mosaic to the join pedestal
+		local toGate = Vector3.new(x, 0, z + 14 - centerZ).Unit
+		local runnerA = Vector3.new(toGate.X * 21.5, y + 0.12, centerZ + toGate.Z * 21.5)
+		local runnerB = Vector3.new(x, y + 0.12, z + 14)
+		part({ Name = "Runner", Size = Vector3.new(7, 0.1, (runnerB - runnerA).Magnitude), CFrame = CFrame.lookAt((runnerA + runnerB) / 2, runnerB), Color = color:Lerp(Color3.new(0.1, 0.05, 0.05), 0.55), Material = Enum.Material.Fabric, CanCollide = false })
 		-- gate sign
 		local sign = part({ Name = "GateSign", Size = Vector3.new(18, 6.4, 0.5), Position = Vector3.new(x, y + 25.5, z + 2.4), Color = Color3.fromRGB(46, 30, 20), Material = Enum.Material.Wood })
 		part({ Name = "GateSignFrame", Size = Vector3.new(19, 7.4, 0.3), Position = Vector3.new(x, y + 25.5, z + 2.1), Color = GOLD, Material = Enum.Material.Metal })
@@ -448,8 +420,9 @@ local function buildHall()
 			{ Name = "Sub", Text = info.Blurb, Position = UDim2.fromScale(0.06, 0.4), Size = UDim2.fromScale(0.88, 0.2), Font = Enum.Font.Merriweather, Color = Color3.fromRGB(230, 210, 180) },
 			{ Name = "Status", Text = "", Position = UDim2.fromScale(0.04, 0.63), Size = UDim2.fromScale(0.92, 0.32), Font = Enum.Font.Merriweather },
 		})
-		local pedestal = part({ Name = "GatePedestal", Size = Vector3.new(3.6, 3, 3.6), Position = Vector3.new(x, y + 1.5, z + 9), Color = Color3.fromRGB(150, 140, 125), Material = Enum.Material.Marble })
-		neon({ Name = "PedestalRune", Size = Vector3.new(3.7, 0.3, 3.7), Position = Vector3.new(x, y + 2.8, z + 9), Color = color, Transparency = 0.3 })
+		-- the join pedestal sits on the floor just in front of the dais (not straddling a step)
+		local pedestal = part({ Name = "GatePedestal", Size = Vector3.new(3.6, 3, 3.6), Position = Vector3.new(x, y + 1.5, z + 11.5), Color = Color3.fromRGB(150, 140, 125), Material = Enum.Material.Marble })
+		neon({ Name = "PedestalRune", Size = Vector3.new(3.7, 0.3, 3.7), Position = Vector3.new(x, y + 2.8, z + 11.5), Color = color, Transparency = 0.3 })
 		local prompt = Instance.new("ProximityPrompt")
 		prompt.Name = "JoinPrompt"
 		prompt.ActionText = "Join " .. info.Name
@@ -479,6 +452,56 @@ local function buildHall()
 	spawn.TopSurface = Enum.SurfaceType.Smooth
 	spawn.Parent = hallFolder
 	part({ Name = "SpawnTrim", Size = Vector3.new(15, 0.9, 10), Position = Vector3.new(0, y + 0.45, depth / 2 - 11), Color = GOLD, Material = Enum.Material.Metal })
+
+	-- Hall of Fame: lifetime leaderboards on the front wall, facing the gates ----------------
+	table.clear(leaderboardLabels)
+	for index, board in ipairs(LeaderboardService.Boards) do
+		local x = index == 1 and -32 or 32
+		local accent = index == 1 and Color3.fromRGB(255, 120, 90) or Color3.fromRGB(150, 200, 255)
+		local wallZ = depth / 2
+		local panel = part({ Name = "Leaderboard_" .. board.Key, Size = Vector3.new(20, 24, 0.6), Position = Vector3.new(x, y + 15, wallZ - 0.9), Color = Color3.fromRGB(40, 26, 18), Material = Enum.Material.Wood })
+		part({ Name = "LeaderboardFrame", Size = Vector3.new(21.6, 25.6, 0.4), Position = Vector3.new(x, y + 15, wallZ - 0.5), Color = GOLD, Material = Enum.Material.Metal })
+		neon({ Name = "LeaderboardGlow", Size = Vector3.new(20, 0.3, 0.3), Position = Vector3.new(x, y + 27.4, wallZ - 1.3), Color = accent, Transparency = 0.2 })
+		for _, side in ipairs({ -1, 1 }) do
+			torch(Vector3.new(x + side * 12.5, y + 8, wallZ - 1.2))
+		end
+		local lines = {
+			{ Name = "Title", Text = board.Title, Position = UDim2.fromScale(0.05, 0.02), Size = UDim2.fromScale(0.9, 0.1), Color = accent },
+			{ Name = "Status", Text = "Loading...", Position = UDim2.fromScale(0.05, 0.12), Size = UDim2.fromScale(0.9, 0.05), Font = Enum.Font.Merriweather, Color = Color3.fromRGB(200, 185, 160) },
+		}
+		for rank = 1, LeaderboardService.TOP_COUNT do
+			table.insert(lines, { Name = "Row" .. rank, Text = "", Position = UDim2.fromScale(0.06, 0.19 + (rank - 1) * 0.078), Size = UDim2.fromScale(0.88, 0.066), Font = Enum.Font.Merriweather, Color = rank == 1 and GOLD or Color3.fromRGB(235, 220, 195) })
+		end
+		local _, labels = surfaceText(panel, Enum.NormalId.Front, lines)
+		local rows = {}
+		for rank = 1, LeaderboardService.TOP_COUNT do
+			rows[rank] = labels["Row" .. rank]
+			rows[rank].TextXAlignment = Enum.TextXAlignment.Left
+		end
+		leaderboardLabels[board.Key] = { Status = labels.Status, Rows = rows }
+	end
+end
+
+local function refreshLeaderboards()
+	for _, board in ipairs(LeaderboardService.Boards) do
+		local target = leaderboardLabels[board.Key]
+		if not target then
+			continue
+		end
+		local rows = LeaderboardService.GetTop(board, LeaderboardService.TOP_COUNT)
+		if not target.Status.Parent then
+			return -- the hall was torn down while we were waiting
+		end
+		if not rows then
+			target.Status.Text = "Leaderboard offline (publish the game / enable API access)"
+		else
+			target.Status.Text = #rows == 0 and "No legends yet - be the first!" or "All-time top " .. LeaderboardService.TOP_COUNT
+		end
+		for rank, label in ipairs(target.Rows) do
+			local row = rows and rows[rank]
+			label.Text = row and string.format("%d.  %s  -  %d", rank, row.Name, row.Value) or ""
+		end
+	end
 end
 
 -- Lobby state -------------------------------------------------------------------------
@@ -777,6 +800,15 @@ function HubService.Init(options)
 		end
 	end))
 	HubService.Broadcast()
+	task.spawn(function()
+		while active do
+			refreshLeaderboards()
+			local waited = 0
+			while active and waited < LEADERBOARD_REFRESH do
+				waited += task.wait(1)
+			end
+		end
+	end)
 end
 
 -- Removes the hall and hub characters (Studio fallback before the local match starts)

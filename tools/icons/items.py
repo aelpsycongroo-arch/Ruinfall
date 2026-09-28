@@ -303,3 +303,53 @@ SKILLS = {
     "Skill_TauntingShockwave": dict(theme=CLASS["Tank"], draw=skill_taunting_shockwave, name="Taunting Shockwave"),
     "Skill_BloodRush": dict(theme=CLASS["Fighter"], draw=skill_blood_rush, name="Blood Rush"),
 }
+
+
+# ---------------------------------------------------------------- class emblems (class picker / HUD)
+# Same painted look as the items: the class's signature weapon over a themed effect.
+def class_assassin(cv, o):
+    import shapes as SH
+    F.fx_shadow(cv, color=(120, 30, 60))
+    SH.twin_daggers(cv, dict(edgeglow=(255, 70, 90), guard="darksteel", gem=(230, 40, 70), blade="steel"))
+    F.fx_bleed(cv, pts=[(30, 80, 1.6), (70, 82, 1.3), (50, 88, 1.1)])
+
+
+def class_mage(cv, o):
+    from circles import circle_damage
+    import shapes as SH
+    c = (170, 100, 255)
+    m = circle_damage()
+    cv.add(c, blur(m, 1.2), 0.45)
+    cv.add(lighten(c, 0.5), m, 0.3)
+    SH.staff(cv, dict(ang=18, gem=(190, 120, 255)))
+    F.fx_mana(cv, color=(150, 110, 255))
+    F.motes(cv, 10, lighten(c, 0.3))
+
+
+def class_marksman(cv, o):
+    import shapes as SH
+    F.fx_wind(cv, color=(150, 255, 160))
+    SH.bow(cv, dict(glow=(170, 255, 160), fletch=(70, 170, 80), gem=(90, 220, 110)))
+    F.fx_mark(cv, color=(120, 255, 130), cx=78, cy=22, r=8)
+
+
+def class_tank(cv, o):
+    import shapes as SH
+    F.fx_shield_dome(cv, color=(110, 160, 255))
+    SH.shield(cv, dict(kind="kite", emblem="wall", mat="cloth", tint=(50, 80, 150), trim="gold"))
+
+
+def class_fighter(cv, o):
+    import shapes as SH
+    F.fx_rage(cv, color=(255, 110, 30))
+    SH.sword(cv, dict(ang=-40, length=66, edgeglow=(255, 170, 80), guard="bronze", s=0.95, off=(-4, 2)))
+    SH.axe(cv, dict(ang=35, double=False, edgeglow=(255, 150, 60), s=0.95, off=(6, 2)))
+
+
+CLASSES = {
+    "Class_Assassin": dict(theme=CLASS["Assassin"], draw=class_assassin),
+    "Class_Mage": dict(theme=CLASS["Mage"], draw=class_mage),
+    "Class_Marksman": dict(theme=CLASS["Marksman"], draw=class_marksman),
+    "Class_Tank": dict(theme=CLASS["Tank"], draw=class_tank),
+    "Class_Fighter": dict(theme=CLASS["Fighter"], draw=class_fighter),
+}

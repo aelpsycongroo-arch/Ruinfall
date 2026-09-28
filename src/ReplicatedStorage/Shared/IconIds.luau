@@ -116,4 +116,5 @@ return {
 		["Shadow Step"] = "rbxassetid://140316930919072",
 		["Taunting Shockwave"] = "rbxassetid://111624619010268",
 	},
+	Classes = {},
 }

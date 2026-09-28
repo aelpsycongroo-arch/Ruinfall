@@ -14,6 +14,7 @@ SHOP = {"Vitality", "Iron", "Swift", "Power", "Regen"}
 SPECIAL = {"WarBand", "MinionUpgrade"}
 SKILLS = {"Skill_ShadowStep": "Shadow Step", "Skill_ArcaneBurst": "Arcane Burst", "Skill_DashShot": "Dash Shot",
           "Skill_TauntingShockwave": "Taunting Shockwave", "Skill_BloodRush": "Blood Rush"}
+CLASS_PREFIX = "Class_"  # Class_Assassin -> ClassDefinitions.Assassin.IconImage
 
 
 def asset(value):
@@ -32,7 +33,7 @@ def lua_table(entries):
 
 def main():
     ids = json.load(open(os.path.join(HERE, "icon_ids.json")))
-    groups = {"Items": {}, "Shop": {}, "Special": {}, "Skills": {}}
+    groups = {"Items": {}, "Shop": {}, "Special": {}, "Skills": {}, "Classes": {}}
     for name, value in ids.items():
         icon = asset(value)
         if not icon:
@@ -41,6 +42,8 @@ def main():
             groups["Shop"][name] = icon
         elif name in SPECIAL:
             groups["Special"][name] = icon
+        elif name.startswith(CLASS_PREFIX):
+            groups["Classes"][name[len(CLASS_PREFIX):]] = icon
         elif name in SKILLS:
             groups["Skills"][SKILLS[name]] = icon
         else:
@@ -49,7 +52,7 @@ def main():
            "-- tools/icons/apply_icons.py from tools/icons/icon_ids.json - edit that json, not this file.",
            "-- An empty table keeps the existing icons. Values are \"rbxassetid://<id>\".",
            "return {"]
-    for group in ("Items", "Shop", "Special", "Skills"):
+    for group in ("Items", "Shop", "Special", "Skills", "Classes"):
         out.append("\t%s = %s," % (group, lua_table(groups[group])))
     out.append("}")
     path = os.path.join(ROOT, "src", "ReplicatedStorage", "Shared", "IconIds.luau")

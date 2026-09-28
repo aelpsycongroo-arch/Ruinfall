@@ -18,6 +18,7 @@ local MonsterService = require(script.Parent:WaitForChild("MonsterService"))
 local RuinService = require(script.Parent:WaitForChild("RuinService"))
 local VisibilityService = require(script.Parent:WaitForChild("VisibilityService"))
 local BotService = require(script.Parent:WaitForChild("BotService"))
+local LeaderboardService = require(script.Parent:WaitForChild("LeaderboardService"))
 
 -- Loaded lazily: they require ItemService, which requires this module (no require cycle)
 local function getLoot()
@@ -327,6 +328,11 @@ function MatchManager.EndMatch(winner)
 		end
 	end
 	local winnerName = context.WinnerName or (winner and Constants.GetTeamName(winner)) or "Nobody"
+	-- lifetime Hall of Fame totals (kills / ruins destroyed) for every real player
+	local recordOk, recordErr = pcall(LeaderboardService.RecordMatch, PlayerService.GetParticipants())
+	if not recordOk then
+		warn("[Ruinfall] leaderboard record failed: " .. tostring(recordErr))
+	end
 	print(string.format("[Ruinfall] Match over | seed=%d winner=%s duration=%ds", context.Seed, winnerName, math.floor(Util.Now() - context.StartedAt)))
 	setState(STATE.ENDING, MATCH.ENDING_DURATION)
 	task.wait(MATCH.ENDING_DURATION)

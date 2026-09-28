@@ -189,4 +189,20 @@ function ClassDefinitions.IsValid(classKey)
 	return type(classKey) == "string" and ClassDefinitions.Classes[classKey] ~= nil
 end
 
+-- Uploaded painted class emblems (Shared.IconIds.Classes, filled by tools/icons/apply_icons.py)
+-- replace the emblems above; empty entries keep the current emblem.
+do
+	local module = script.Parent:FindFirstChild("IconIds")
+	local ok, ids = pcall(function()
+		return module and require(module)
+	end)
+	if ok and type(ids) == "table" then
+		for classKey, icon in pairs(ids.Classes or {}) do
+			if ClassDefinitions.Classes[classKey] and icon ~= "" then
+				ClassDefinitions.Classes[classKey].IconImage = icon
+			end
+		end
+	end
+end
+
 return ClassDefinitions

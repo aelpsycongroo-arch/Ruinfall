@@ -7,7 +7,7 @@ from PIL import Image, ImageDraw
 from iconkit import Canvas
 import shapes as SH
 from circles import draw_circle
-from items import ITEMS, SKILLS
+from items import ITEMS, SKILLS, CLASSES
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUTDIR = os.path.join(HERE, "out")
@@ -15,8 +15,8 @@ OUTDIR = os.path.join(HERE, "out")
 
 def render(key):
     seed = zlib.crc32(key.encode())
-    if key in SKILLS:
-        e = SKILLS[key]
+    if key in SKILLS or key in CLASSES:
+        e = SKILLS.get(key) or CLASSES[key]
         cv = Canvas(e["theme"], seed=seed)
         cv.backdrop(glow=0.8)
         e["draw"](cv, {})
@@ -48,7 +48,7 @@ def sheet(keys, path, cols=10, cell=150):
     im.save(path)
 
 
-ALL = list(ITEMS) + list(SKILLS)
+ALL = list(ITEMS) + list(SKILLS) + list(CLASSES)
 
 if __name__ == "__main__":
     os.makedirs(OUTDIR, exist_ok=True)
