@@ -370,6 +370,7 @@ function MatchManager.RunRoyaleMatch()
 		VisibilityService.Setup(mapData, activeTeams)
 		Loot.Setup(mapData, true)
 		Royale.Setup(mapData, seed)
+		CombatService.GoldEnabled = false -- no gold economy in free for all
 	end)
 	if not ok then
 		warn("[Ruinfall] Royale setup failed:", err)
@@ -506,6 +507,7 @@ function MatchManager.RunMatch()
 		RuinService.Setup(mapData, seed)
 		VisibilityService.Setup(mapData, activeTeams)
 		getLoot().Setup(mapData, false) -- health potions from camp monsters
+		CombatService.GoldEnabled = true
 	end)
 	if not ok then
 		warn("[Ruinfall] Match setup failed:", err)
@@ -613,7 +615,8 @@ function MatchManager.RequestStart(player)
 end
 
 function MatchManager.RequestReturn(player)
-	if MatchManager.State == STATE.RESULTS and (not player or PlayerService.IsHost(player)) then
+	-- any player may end the results screen early (both modes)
+	if MatchManager.State == STATE.RESULTS then
 		returnRequested = true
 		return true
 	end

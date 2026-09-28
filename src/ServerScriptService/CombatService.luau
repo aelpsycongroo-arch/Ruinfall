@@ -33,6 +33,10 @@ local UNIT_KINDS = { Hero = true, Monster = true, Creep = true }
 local BUFFS = CombatDefinitions.Buffs
 local MELEE_LAG_COMPENSATION = 0.12 -- seconds of movement to lead a running melee swing
 local MELEE_MAX_LEAD = 3 -- studs
+-- Moving targets: the attacker's screen shows everyone else slightly in the past, so a
+-- target also counts as hit where it was HIT_REWIND seconds ago (capped at HIT_MAX_REWIND).
+local HIT_REWIND = 0.15
+local HIT_MAX_REWIND = 3.5
 local COMBAT = Constants.Combat
 local MANA = CombatDefinitions.Mana or { Base = 300, RegenPerSecond = 6 }
 local CRIT_MULTIPLIER = CombatDefinitions.CritMultiplier or 1.5
@@ -634,8 +638,9 @@ function CombatService.Kill(target, killer)
 	if target.Participant then
 		target.Participant.Stats.Deaths += 1
 	end
-	-- Gold rewards (only the player who lands the killing blow gets gold)
-	if killer and killer.Participant and killer.Kind == "Hero" then
+	-- Gold rewards (only the player who lands the killing blow gets gold).
+	-- GoldEnabled = false in Shattered Expanse (no shop there, so no gold economy).
+	if killer and killer.Participant and killer.Kind == "Hero" and CombatService.GoldEnabled ~= false then
 		local reward = 0
 		if target.Kind == "Hero" then
 			reward = ShopDefinitions.GoldRewards.HeroKill
@@ -662,7 +667,7 @@ function CombatService.Kill(target, killer)
 	end
 	-- Assists: every other enemy player who hit / stunned / taunted this hero in the last
 	-- AssistWindow seconds gets AssistShare (60%) of the hero kill gold
-	if target.Kind == "Hero" and target.AssistLog then
+	if target.Kind == "Hero" and target.AssistLog and CombatService.GoldEnabled ~= false then
 		local rewards = ShopDefinitions.GoldRewards
 		local window = rewards.AssistWindow or 5
 		local assistGold = math.floor(rewards.HeroKill * (rewards.AssistShare or 0.6) + 0.5)
@@ -843,11 +848,44 @@ function CombatService.FindNearestEnemy(source, position, range, filter)
 	return best, bestDistance
 end
 
+-- Where a target can be hit: its current position and, while it moves, where it was a
+-- moment ago (what other players are seeing). Lag-tolerant hitboxes for melee and AoE.
+function CombatService.GetHitPositions(entity)
+	local current = CombatService.GetPosition(entity)
+	local root = entity.Root
+	if root and root.Parent and (entity.Kind == "Hero" or entity.Kind == "Creep" or entity.Kind == "Monster") then
+		local velocity = Util.Flat(root.AssemblyLinearVelocity)
+		if velocity.Magnitude > 2 then
+			local back = velocity * HIT_REWIND
+			if back.Magnitude > HIT_MAX_REWIND then
+				back = back.Unit * HIT_MAX_REWIND
+			end
+			return current, current - back
+		end
+	end
+	return current, nil
+end
+
+-- A running player's own abilities start where their avatar really is (same lead as melee).
+function CombatService.GetCastOrigin(entity)
+	local origin = CombatService.GetPosition(entity)
+	if entity.Player and entity.Root and entity.Root.Parent then
+		local lead = Util.Flat(entity.Root.AssemblyLinearVelocity) * MELEE_LAG_COMPENSATION
+		if lead.Magnitude > MELEE_MAX_LEAD then
+			lead = lead.Unit * MELEE_MAX_LEAD
+		end
+		origin += lead
+	end
+	return origin
+end
+
 function CombatService.GetEntitiesInRadius(position, radius, predicate)
 	local results = {}
 	for _, entity in pairs(CombatService.Entities) do
 		if entity.Alive and (not predicate or predicate(entity)) then
-			if Util.FlatDistance(position, CombatService.GetPosition(entity)) <= radius + entity.Radius then
+			local now, before = CombatService.GetHitPositions(entity)
+			local limit = radius + entity.Radius
+			if Util.FlatDistance(position, now) <= limit or (before and Util.FlatDistance(position, before) <= limit) then
 				table.insert(results, entity)
 			end
 		end
@@ -1018,12 +1056,17 @@ function CombatService.MeleeStrike(attacker, origin, direction, range, arcDegree
 	local hits = {}
 	for _, target in pairs(CombatService.Entities) do
 		if target.Alive and target ~= attacker and CombatService.AreEnemies(attacker, target) then
-			local offset = Util.Flat(CombatService.GetPosition(target) - origin)
-			local distance = offset.Magnitude
-			if distance <= range + target.Radius then
-				local inArc = distance <= target.Radius + 1 or offset.Unit:Dot(direction) >= cosHalfArc
-				if inArc and CombatService.HasLineOfSight(origin, CombatService.GetPosition(target)) then
-					table.insert(hits, { Target = target, Distance = distance })
+			-- test the target where it is now and where it just was (lag-tolerant)
+			local now, before = CombatService.GetHitPositions(target)
+			for _, spot in ipairs({ now, before }) do
+				local offset = Util.Flat(spot - origin)
+				local distance = offset.Magnitude
+				if distance <= range + target.Radius then
+					local inArc = distance <= target.Radius + 1 or offset.Unit:Dot(direction) >= cosHalfArc
+					if inArc and CombatService.HasLineOfSight(origin, spot) then
+						table.insert(hits, { Target = target, Distance = distance })
+						break
+					end
 				end
 			end
 		end
@@ -1255,26 +1298,46 @@ function CombatService.IsInEnemySmoke(entity)
 end
 
 -- Royale: switch a living hero to another class (picked up that class's weapon).
--- Keeps the current health fraction; stats, attack and Q come from the new class.
+-- Every stat is rebuilt from scratch = NEW class base + equipped items. Nothing of the old
+-- class survives (no Fighter HP / AD / armour / speed carried over, no Blood Rush, no
+-- empowered strike); only the current health FRACTION is kept.
 function CombatService.SetClass(entity, classKey)
 	local classDef = ClassDefinitions.Get(classKey)
 	if not entity or entity.Kind ~= "Hero" or not classDef then
 		return false
 	end
-	local fraction = entity.MaxHealth > 0 and entity.Health / entity.MaxHealth or 1
+	local fraction = entity.MaxHealth > 0 and math.clamp(entity.Health / entity.MaxHealth, 0.05, 1) or 1
+	local participant = entity.Participant
+	if participant then
+		participant.ClassKey = classKey
+	end
 	entity.ClassKey = classKey
 	entity.Class = classDef
+	-- class-specific temporary state
 	entity.AbilityReadyAt = Util.Now() + 1
 	entity.BloodRushUntil = 0
+	entity.FrenzyUntil = 0
+	entity.FrenzyAttackSpeed = 0
 	entity.NextAttackMultiplier = 1
-	if entity.Participant then
-		entity.Participant.ClassKey = classKey
-		CombatService.RefreshParticipantBonuses(entity.Participant)
-	end
+	entity.NextAttackExpires = 0
+	-- base stats of the new class + item bonuses, assigned (never added on top)
+	local bonuses = CombatService.ComputeShopBonuses(participant)
+	entity.MaxHealth = classDef.MaxHealth + bonuses.MaxHealth
+	entity.Armor = classDef.Armor + bonuses.Armor
+	entity.BaseSpeed = classDef.MoveSpeed + bonuses.MoveSpeed
+	entity.BonusAttackDamage = bonuses.AttackDamage
+	entity.BonusHealthRegen = bonuses.HealthRegen
+	entity.BonusAttackSpeed = bonuses.AttackSpeed
+	applyExtraStats(entity, bonuses, false)
 	entity.Health = math.max(1, entity.MaxHealth * fraction)
+	if entity.Humanoid and entity.Humanoid.Parent then
+		entity.Humanoid.MaxHealth = entity.MaxHealth
+		entity.Humanoid.Health = entity.Humanoid.MaxHealth
+	end
 	CombatService.SyncHealth(entity)
 	if entity.Model then
 		entity.Model:SetAttribute("Class", classKey)
+		entity.Model:SetAttribute("EmpoweredAttack", false)
 	end
 	CombatService.RecomputeSpeed(entity)
 	CombatService.PushHeroAttributes(entity)

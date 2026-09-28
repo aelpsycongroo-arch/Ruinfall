@@ -90,4 +90,19 @@ function ShopDefinitions.GetBuyPrice(item, purchaseCount)
 	return item.Price + ShopDefinitions.PRICE_INCREMENT * (purchaseCount or 0)
 end
 
+-- Uploaded painted icons (Shared.IconIds) override the shop icons above
+do
+	local module = script.Parent:FindFirstChild("IconIds")
+	local ok, ids = pcall(function()
+		return module and require(module)
+	end)
+	if ok and type(ids) == "table" then
+		for key, icon in pairs(ids.Shop or {}) do
+			if ShopDefinitions.Items[key] and icon ~= "" then
+				ShopDefinitions.Items[key].Icon = icon
+			end
+		end
+	end
+end
+
 return ShopDefinitions

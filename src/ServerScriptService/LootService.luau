@@ -68,7 +68,7 @@ end
 -- Entry descriptions (name, colour, one-line summary, icon) -------------------------------
 function LootService.Describe(entry)
 	if entry.Kind == "Potion" then
-		return { Name = "Health Potion", Summary = string.format("Heals %d%% over %ds  |  drink with H", LOOT.POTION_HEAL_PERCENT * 100, LOOT.POTION_HEAL_TIME), Color = POTION_COLOR, Icon = "", Slot = "Potion" }
+		return { Name = "Health Potion", Summary = string.format("+%d%% HP  +%d%% Mana over %ds  |  drink with H", LOOT.POTION_HEAL_PERCENT * 100, LOOT.POTION_MANA_PERCENT * 100, LOOT.POTION_HEAL_TIME), Color = POTION_COLOR, Icon = "", Slot = "Potion" }
 	elseif entry.Kind == "Weapon" then
 		local classDef = ClassDefinitions.Get(entry.Key)
 		local ability = classDef and classDef.Ability
@@ -136,7 +136,7 @@ local function chestPayload(chest)
 		info.Key = entry.Key
 		table.insert(entries, info)
 	end
-	return { Id = chest.Id, Entries = entries }
+	return { Id = chest.Id, Entries = entries, Position = chest.Position }
 end
 
 local function refreshChestLabel(chest)
@@ -411,12 +411,16 @@ function LootService.UsePotion(participant)
 	if now < (potionReadyAt[participant] or 0) then
 		return false, string.format("Potion ready in %.0fs", potionReadyAt[participant] - now)
 	end
-	if entity.Health >= entity.MaxHealth then
-		return false, "Already at full health"
+	if entity.Health >= entity.MaxHealth and (entity.Mana or 0) >= (entity.MaxMana or 0) then
+		return false, "Already at full health and mana"
 	end
 	participant.Potions -= 1
 	potionReadyAt[participant] = now + LOOT.POTION_COOLDOWN
-	healing[entity] = { PerSecond = entity.MaxHealth * LOOT.POTION_HEAL_PERCENT / LOOT.POTION_HEAL_TIME, Until = now + LOOT.POTION_HEAL_TIME }
+	healing[entity] = {
+		PerSecond = entity.MaxHealth * LOOT.POTION_HEAL_PERCENT / LOOT.POTION_HEAL_TIME,
+		ManaPerSecond = (entity.MaxMana or 0) * LOOT.POTION_MANA_PERCENT / LOOT.POTION_HEAL_TIME, -- restores mana too
+		Until = now + LOOT.POTION_HEAL_TIME,
+	}
 	Net.Effect("Heal", { Position = CombatService.GetPosition(entity), Amount = math.floor(entity.MaxHealth * LOOT.POTION_HEAL_PERCENT) })
 	PlayerService.SetPlayerAttributes(participant)
 	return true
@@ -670,6 +674,10 @@ local function tick()
 			healing[entity] = nil
 		else
 			CombatService.Heal(entity, heal.PerSecond * TICK, false)
+			if heal.ManaPerSecond > 0 and entity.MaxMana then
+				entity.Mana = math.min(entity.MaxMana, (entity.Mana or 0) + heal.ManaPerSecond * TICK)
+				CombatService.SyncMana(entity)
+			end
 		end
 	end
 	for _, participant in ipairs(PlayerService.GetParticipants()) do

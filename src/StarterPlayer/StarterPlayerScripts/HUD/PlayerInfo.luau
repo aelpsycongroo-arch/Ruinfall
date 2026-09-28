@@ -160,6 +160,11 @@ function PlayerInfo:Tick(character, now, me, state, startingState)
 	if me and me.Stats then
 		setText(self.Gold, tostring(math.floor(me.Stats.Gold or 0)))
 	end
+	-- Shattered Expanse has no gold economy: hide the counter there
+	local goldFrame = self.Gold and self.Gold.Parent
+	if goldFrame and goldFrame:IsA("GuiObject") then
+		goldFrame.Visible = not (state and state.Royale)
+	end
 	if not character then
 		self.Buff.Frame.Visible, self.Fragment.Frame.Visible, self.Status.Frame.Visible = false, false, false
 		return

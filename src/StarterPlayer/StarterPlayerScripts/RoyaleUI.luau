@@ -144,7 +144,7 @@ function RoyaleUI.new(screen, clientState)
 		end)
 		self.GearRows[index] = { Key = slot.Key, Name = name, Sub = sub, Action = action }
 	end
-	Label({ Text = "F: open chest   H: drink potion", Font = FONTS.Medium, TextSize = 12, TextColor3 = COLORS.Subtext, Position = UDim2.new(0, 12, 1, -22), Size = UDim2.new(1, -24, 0, 16), ZIndex = 7, Parent = gear })
+	Label({ Text = "F: open chest   H: potion   I: hide", Font = FONTS.Medium, TextSize = 12, TextColor3 = COLORS.Subtext, Position = UDim2.new(0, 12, 1, -22), Size = UDim2.new(1, -24, 0, 16), ZIndex = 7, Parent = gear })
 
 	-- Supply chest window: every entry with its short stats; drag an entry onto YOUR GEAR
 	-- (or tap it on touch screens) to take it.
@@ -152,7 +152,7 @@ function RoyaleUI.new(screen, clientState)
 	self.ChestFrame = chestFrame
 	UITheme.MedievalPanel(chestFrame, true)
 	self.ChestTitle = Label({ Text = "SUPPLY CHEST", Font = FONTS.Title, TextSize = 20, TextColor3 = COLORS.Gold, Position = UDim2.fromOffset(14, 8), Size = UDim2.new(1, -60, 0, 24), ZIndex = 21, Parent = chestFrame })
-	Label({ Text = "Drag an item onto YOUR GEAR to take it. What it replaces goes back in the chest.", Font = FONTS.Medium, TextSize = 12, TextColor3 = COLORS.Subtext, TextWrapped = true, Position = UDim2.fromOffset(14, 32), Size = UDim2.new(1, -28, 0, 30), ZIndex = 21, Parent = chestFrame })
+	Label({ Text = "Right-click to equip, or drag onto YOUR GEAR. What it replaces goes back in the chest.", Font = FONTS.Medium, TextSize = 12, TextColor3 = COLORS.Subtext, TextWrapped = true, Position = UDim2.fromOffset(14, 32), Size = UDim2.new(1, -28, 0, 30), ZIndex = 21, Parent = chestFrame })
 	Button({ Text = "X", Font = FONTS.Title, TextSize = 16, BackgroundColor3 = Color3.fromRGB(95, 45, 40), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -8, 0, 8), Size = UDim2.fromOffset(30, 26), ZIndex = 22, Parent = chestFrame }, function()
 		self:CloseChest(true)
 	end)
@@ -213,7 +213,14 @@ function RoyaleUI.new(screen, clientState)
 	self.Potion = potion
 
 	UserInputService.InputBegan:Connect(function(input, processed)
-		if processed or input.KeyCode ~= Enum.KeyCode.H then
+		if processed then
+			return
+		end
+		if input.KeyCode == Enum.KeyCode.I then
+			self.GearToggled = not self.GearToggled
+			return
+		end
+		if input.KeyCode ~= Enum.KeyCode.H then
 			return
 		end
 		if self.ClientState.GetMatchState() == STATE.ACTIVE then
@@ -346,7 +353,8 @@ function RoyaleUI:RenderPicks(royale)
 		marker.Zone:FindFirstChildOfClass("UIStroke").Color = color
 		marker.Dot.BackgroundColor3 = color
 		marker.Dot.Size = UDim2.fromOffset(mine and 14 or 10, mine and 14 or 10)
-		marker.Name.Text = mine and "YOU" or pick.Name
+		marker.Name.Text = mine and "YOU" or "" -- other players stay anonymous on the landing map
+		marker.Name.Visible = mine
 		marker.Name.TextColor3 = color
 	end
 	for id, marker in pairs(self.PickMarkers) do
@@ -369,6 +377,11 @@ end
 
 function RoyaleUI:ShowChest(payload)
 	self.OpenChestId = payload.Id
+	self.ChestPosition = payload.Position
+	if not self.ChestOpenDistance then
+		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+		self.ChestOpenDistance = (root and payload.Position) and (Vector3.new(root.Position.X, 0, root.Position.Z) - Vector3.new(payload.Position.X, 0, payload.Position.Z)).Magnitude or 6
+	end
 	local list = self.ChestList
 	for _, child in ipairs(list:GetChildren()) do
 		if child:IsA("GuiObject") then
@@ -387,10 +400,16 @@ function RoyaleUI:ShowChest(payload)
 		else
 			Label({ Text = entry.Kind == "Potion" and "+" or string.sub(entry.Name, 1, 1), Font = FONTS.Title, TextSize = 22, TextXAlignment = Enum.TextXAlignment.Center, Size = UDim2.fromScale(1, 1), ZIndex = 24, Parent = icon })
 		end
-		local slot = entry.Slot == "Weapon" and "WEAPON" or entry.Slot == "Boots" and "BOOTS" or entry.Slot == "Passive" and "PASSIVE" or entry.Slot == "Potion" and "POTION" or "MYTHIC"
-		Label({ Text = entry.Name, Font = FONTS.Bold, TextSize = 14, TextColor3 = entry.Color or COLORS.Text, Position = UDim2.fromOffset(52, 5), Size = UDim2.new(1, -120, 0, 18), TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 23, Parent = row })
-		Label({ Text = slot, Font = FONTS.Title, TextSize = 11, TextColor3 = COLORS.Subtext, TextXAlignment = Enum.TextXAlignment.Right, AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -8, 0, 6), Size = UDim2.fromOffset(70, 14), ZIndex = 23, Parent = row })
+		-- where it will go when taken
+		local slot = entry.Slot == "Weapon" and "WEAPON + Q" or entry.Slot == "Boots" and "M2" or entry.Slot == "Passive" and "PASSIVE" or entry.Slot == "Potion" and "POTION" or "E / R"
+		Label({ Text = entry.Name, Font = FONTS.Bold, TextSize = 14, TextColor3 = entry.Color or COLORS.Text, Position = UDim2.fromOffset(52, 5), Size = UDim2.new(1, -140, 0, 18), TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 23, Parent = row })
+		local slotTag = Label({ Text = slot, Font = FONTS.Title, TextSize = 12, TextColor3 = Color3.fromRGB(30, 20, 10), BackgroundColor3 = COLORS.Gold, BackgroundTransparency = 0.1, TextXAlignment = Enum.TextXAlignment.Center, AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -6, 0, 5), Size = UDim2.fromOffset(78, 17), ZIndex = 23, Parent = row })
+		UITheme.Corner(slotTag, 4)
 		Label({ Text = entry.Summary or "", Font = FONTS.Medium, TextSize = 12, TextColor3 = COLORS.Text, Position = UDim2.fromOffset(52, 25), Size = UDim2.new(1, -60, 0, 18), TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 23, Parent = row })
+		-- right click: equip straight away (a GUI click, so it never casts the boots skill)
+		row.MouseButton2Click:Connect(function()
+			self.Remotes.LootRequest:FireServer("Take", payload.Id, entry.Index)
+		end)
 		row.InputBegan:Connect(function(input)
 			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 				local touch = input.UserInputType == Enum.UserInputType.Touch
@@ -411,6 +430,8 @@ function RoyaleUI:CloseChest(tellServer)
 		self.Remotes.LootRequest:FireServer("CloseChest")
 	end
 	self.OpenChestId = nil
+	self.ChestPosition = nil
+	self.ChestOpenDistance = nil
 	self.ChestFrame.Visible = false
 	self.Dragging = nil
 	self.DragGhost.Visible = false
@@ -454,6 +475,8 @@ function RoyaleUI:Update(state)
 
 	-- royale overlay
 	self.Overlay.Visible = royale ~= nil and inMatch
+	-- the gear panel stays hidden unless a chest is open or it is toggled with I
+	self.GearPanel.Visible = self.OpenChestId ~= nil or self.GearToggled == true
 	if royale and inMatch then
 		local zone = royale.Zone
 		if zone then
@@ -520,6 +543,15 @@ end
 
 -- per frame: out-of-zone warning
 function RoyaleUI:Tick()
+	-- close the chest as soon as the hero walks away from it
+	if self.OpenChestId and self.ChestPosition then
+		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+		local distance = root and (Vector3.new(root.Position.X, 0, root.Position.Z) - Vector3.new(self.ChestPosition.X, 0, self.ChestPosition.Z)).Magnitude or math.huge
+		if distance > math.max((self.ChestOpenDistance or 6) + 2.5, 7) then
+			self:CloseChest(true)
+		end
+	end
+	self.GearPanel.Visible = self.Overlay.Visible and (self.OpenChestId ~= nil or self.GearToggled == true)
 	local zone = self.Overlay.Visible and self.Zone
 	local character = player.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart")

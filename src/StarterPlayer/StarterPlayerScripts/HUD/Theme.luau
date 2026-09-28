@@ -118,6 +118,21 @@ Theme.ButtonStyles = {
 Theme.AbilityIcons = {
 	["Blood Rush"] = Theme.Art.IconBloodRush,
 }
+-- uploaded painted skill icons (ReplicatedStorage.Shared.IconIds.Skills) take priority
+do
+	local shared = game:GetService("ReplicatedStorage"):FindFirstChild("Shared")
+	local module = shared and shared:FindFirstChild("IconIds")
+	local ok, ids = pcall(function()
+		return module and require(module)
+	end)
+	if ok and type(ids) == "table" then
+		for name, icon in pairs(ids.Skills or {}) do
+			if icon ~= "" then
+				Theme.AbilityIcons[name] = icon
+			end
+		end
+	end
+end
 
 -- Input mapping shown on the ability bar (DO NOT CHANGE: LM melee, Q class ability,
 -- E / R item slots, MR boots). The 3 passive slots next to the boots have no key.

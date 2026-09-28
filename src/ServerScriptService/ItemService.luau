@@ -1158,7 +1158,7 @@ function ItemService.UseSlot(entity, slot, aimPosition, targetId)
 	if manaCost > 0 and (entity.Mana or 0) < manaCost then
 		return false, "Not enough mana"
 	end
-	local origin = CombatService.GetPosition(entity)
+	local origin = CombatService.GetCastOrigin(entity) -- lag lead while running
 	participant.ItemReadyAt[itemId] = now + CombatService.GetCooldown(entity, ability.Cooldown) -- set first: rejects re-entrant spam
 	-- handlers get a copy whose Damage / Shield are numbers scaled from the caster's current stats
 	local resolved = AbilityScaling.Resolve(ability, AbilityScaling.StatsFromEntity(entity))

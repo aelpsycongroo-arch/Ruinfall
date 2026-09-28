@@ -131,7 +131,7 @@ function AbilityService.Use(entity, aimPosition)
 	if not handler then
 		return false
 	end
-	local origin = CombatService.GetPosition(entity)
+	local origin = CombatService.GetCastOrigin(entity) -- lag lead while running
 	local offset = Util.Flat(aimPosition - origin)
 	if offset.Magnitude > Constants.Combat.MAX_AIM_DISTANCE then
 		aimPosition = origin + offset.Unit * Constants.Combat.MAX_AIM_DISTANCE

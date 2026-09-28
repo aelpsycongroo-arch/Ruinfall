@@ -170,6 +170,7 @@ Constants.Royale = {
 Constants.Loot = {
 	PICKUP_RADIUS = 6,
 	POTION_HEAL_PERCENT = 0.35, -- of max health, restored over POTION_HEAL_TIME
+	POTION_MANA_PERCENT = 0.35, -- of max mana, restored over the same time
 	POTION_HEAL_TIME = 3,
 	POTION_COOLDOWN = 8,
 	MAX_POTIONS = 5,

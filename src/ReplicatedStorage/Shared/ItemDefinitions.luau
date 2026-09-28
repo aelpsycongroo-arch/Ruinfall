@@ -1138,4 +1138,27 @@ function ItemDefinitions.GetStatText(item)
 	return table.concat(parts, ", ")
 end
 
+-- Uploaded painted icons (Shared.IconIds, filled by tools/icons/apply_icons.py) override the
+-- icons above; empty entries keep the current icon.
+do
+	local module = script.Parent:FindFirstChild("IconIds")
+	local ok, ids = pcall(function()
+		return module and require(module)
+	end)
+	if ok and type(ids) == "table" then
+		for id, icon in pairs(ids.Items or {}) do
+			if ItemDefinitions.Items[id] and icon ~= "" then
+				ItemDefinitions.Items[id].Icon = icon
+			end
+		end
+		local special = ids.Special or {}
+		if special.WarBand and special.WarBand ~= "" then
+			ItemDefinitions.CreepWave.Icon = special.WarBand
+		end
+		if special.MinionUpgrade and special.MinionUpgrade ~= "" then
+			ItemDefinitions.MinionUpgrade.Icon = special.MinionUpgrade
+		end
+	end
+end
+
 return ItemDefinitions

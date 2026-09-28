@@ -69,8 +69,12 @@ function ResultsUI.new(screen, clientState)
 		self.Rows[index] = { Frame = rowFrame, TeamBar = teamBar, Cells = cells }
 	end
 
-	self.ReturnButton = Button({ Name = "ReturnButton", Text = "RETURN TO LOBBY", Font = FONTS.Title, TextSize = 22, TextColor3 = Color3.fromRGB(30, 20, 10), BackgroundColor3 = COLORS.Gold, AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 540), Size = UDim2.fromOffset(340, 56), Parent = container }, function()
+	-- both modes: everyone can go back to this server's lobby or leave for the Ruinfall Hall
+	self.ReturnButton = Button({ Name = "ReturnButton", Text = "RETURN TO LOBBY", Font = FONTS.Title, TextSize = 22, TextColor3 = Color3.fromRGB(30, 20, 10), BackgroundColor3 = COLORS.Gold, AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(0.5, -10, 0, 540), Size = UDim2.fromOffset(300, 56), Parent = container }, function()
 		remotes.MatchRequest:FireServer("ReturnToLobby")
+	end)
+	self.HallButton = Button({ Name = "HallButton", Text = "RETURN TO RUINFALL HALL", Font = FONTS.Title, TextSize = 20, BackgroundColor3 = Color3.fromRGB(70, 52, 90), AnchorPoint = Vector2.new(0, 0), Position = UDim2.new(0.5, 10, 0, 540), Size = UDim2.fromOffset(300, 56), Parent = container }, function()
+		remotes.HubRequest:FireServer("ReturnToHall")
 	end)
 	self.Countdown = Label({ Text = "", Font = FONTS.Medium, TextSize = 14, TextColor3 = COLORS.Subtext, TextXAlignment = Enum.TextXAlignment.Center, Position = UDim2.fromOffset(0, 600), Size = UDim2.new(1, 0, 0, 18), Parent = container })
 	return self
@@ -148,10 +152,9 @@ function ResultsUI:Update(state)
 			row.Cells.Status.TextColor3 = won and COLORS.Gold or COLORS.Danger
 		end
 	end
-	local isHost = self.ClientState.IsHost()
-	self.ReturnButton.Visible = isHost
+	self.ReturnButton.Visible = true
 	local remaining = math.max(0, math.ceil((state.StateEndsAt or 0) - workspace:GetServerTimeNow()))
-	self.Countdown.Text = (isHost and "" or "Waiting for host - ") .. "Returning to lobby in " .. remaining .. "s"
+	self.Countdown.Text = "Returning to lobby in " .. remaining .. "s"
 end
 
 return ResultsUI
