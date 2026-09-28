@@ -79,6 +79,7 @@ function AbilityBar.new(group, clientState, combatController)
 	}
 	self.Tooltip.Frame.Visible = false
 	self:StyleTooltip()
+	self:FitIcons()
 	self:SetupDragging()
 	return self
 end
@@ -251,6 +252,35 @@ function AbilityBar:Tick(character, now, me)
 		end
 	end
 	self:UpdateTooltip()
+end
+
+-- The icon images in the place cover only ~80% of their slot and are stretched when a slot
+-- is not perfectly square. Make every icon fill its whole slot edge to edge, cropped (never
+-- squashed), with the slot's rounded corners.
+function AbilityBar:FitIcons()
+	local cells = {}
+	for _, slot in pairs(self.Slots) do
+		table.insert(cells, slot)
+	end
+	for _, slot in ipairs(self.PassiveSlots) do
+		table.insert(cells, slot)
+	end
+	for _, cell in ipairs(cells) do
+		local icon, frame = cell.Icon, cell.Frame
+		if icon and frame then
+			icon.AnchorPoint = Vector2.new(0.5, 0.5)
+			icon.Position = UDim2.fromScale(0.5, 0.5)
+			icon.Size = UDim2.fromScale(1, 1)
+			icon.ScaleType = Enum.ScaleType.Crop
+			icon.BackgroundTransparency = 1
+			local frameCorner = frame:FindFirstChildOfClass("UICorner")
+			if frameCorner and not icon:FindFirstChildOfClass("UICorner") then
+				local corner = Instance.new("UICorner")
+				corner.CornerRadius = frameCorner.CornerRadius
+				corner.Parent = icon
+			end
+		end
+	end
 end
 
 -- The tooltip in the place shrinks its text to fit a small fixed box (unreadable for long

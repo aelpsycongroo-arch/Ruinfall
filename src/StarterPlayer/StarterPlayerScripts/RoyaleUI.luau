@@ -402,7 +402,8 @@ function RoyaleUI:ShowChest(payload)
 		local icon = New("Frame", { Position = UDim2.fromOffset(5, 5), Size = UDim2.fromOffset(40, 40), BackgroundColor3 = (entry.Color or COLORS.Gold):Lerp(Color3.new(0, 0, 0), 0.5), ZIndex = 23, Parent = row })
 		UITheme.Corner(icon, 5)
 		if entry.Icon and entry.Icon ~= "" then
-			New("ImageLabel", { BackgroundTransparency = 1, Image = entry.Icon, Size = UDim2.fromScale(1, 1), ZIndex = 24, Parent = icon })
+			local art = New("ImageLabel", { BackgroundTransparency = 1, Image = entry.Icon, Size = UDim2.fromScale(1, 1), ScaleType = Enum.ScaleType.Crop, ZIndex = 24, Parent = icon })
+			UITheme.Corner(art, 5)
 		else
 			Label({ Text = entry.Kind == "Potion" and "+" or string.sub(entry.Name, 1, 1), Font = FONTS.Title, TextSize = 22, TextXAlignment = Enum.TextXAlignment.Center, Size = UDim2.fromScale(1, 1), ZIndex = 24, Parent = icon })
 		end
