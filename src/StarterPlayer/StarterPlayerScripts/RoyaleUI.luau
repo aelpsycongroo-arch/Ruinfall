@@ -18,7 +18,9 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Constants = require(Shared:WaitForChild("Constants"))
 local ClassDefinitions = require(Shared:WaitForChild("ClassDefinitions"))
 local ItemDefinitions = require(Shared:WaitForChild("ItemDefinitions"))
+local ZoneMath = require(Shared:WaitForChild("ZoneMath"))
 local UITheme = require(script.Parent:WaitForChild("UITheme"))
+local ZoneWall = require(script.Parent:WaitForChild("ZoneWall"))
 
 -- Constants
 local STATE = Constants.MatchState
@@ -66,6 +68,8 @@ function RoyaleUI.new(screen, clientState)
 	self.Scale = 1
 	self.Radius = Constants.Royale.MAP_RADIUS
 	self.BuiltSeed = nil
+	self.Wall = ZoneWall.new()
+	self.WallZone = nil
 
 	-- Deploy screen -------------------------------------------------------------------------
 	local deploy = New("Frame", { Name = "RoyaleDeploy", Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.fromRGB(10, 8, 12), BackgroundTransparency = 0.05, Visible = false, ZIndex = 30, Parent = screen })
@@ -241,7 +245,8 @@ function RoyaleUI:ScreenToWorld(screenPosition)
 	if size.X <= 0 then
 		return nil
 	end
-	local local_ = (screenPosition - holder.AbsolutePosition) * (MAP_PX / size.X)
+	-- screenPosition is full-screen (GetMouseLocation); AbsolutePosition never counts the top-bar inset
+	local local_ = (screenPosition - GuiService:GetGuiInset() - holder.AbsolutePosition) * (MAP_PX / size.X)
 	local x = (local_.X - MAP_PX / 2) / self.Scale
 	local z = (local_.Y - MAP_PX / 2) / self.Scale
 	return Vector3.new(x, 0, z)
@@ -371,6 +376,7 @@ function RoyaleUI:OverGear(point)
 	if not gear or not self.Overlay.Visible then
 		return false
 	end
+	point -= GuiService:GetGuiInset() -- to AbsolutePosition space
 	local position, size = gear.AbsolutePosition, gear.AbsoluteSize
 	return point.X >= position.X and point.X <= position.X + size.X and point.Y >= position.Y and point.Y <= position.Y + size.Y
 end
@@ -443,6 +449,8 @@ function RoyaleUI:Update(state)
 	local matchState = state.State
 	local inMatch = matchState == STATE.STARTING or matchState == STATE.ACTIVE or matchState == STATE.ENDING
 	local me = self.ClientState.GetMe()
+	-- the storm wall is drawn locally from the zone snapshot (smooth, see ZoneWall)
+	self.WallZone = royale and (inMatch or matchState == STATE.RESULTS) and royale.Zone or nil
 
 	-- deploy map
 	local deploying = royale ~= nil and matchState == STATE.DEPLOYING
@@ -552,12 +560,18 @@ function RoyaleUI:Tick()
 		end
 	end
 	self.GearPanel.Visible = self.Overlay.Visible and (self.OpenChestId ~= nil or self.GearToggled == true)
+	local now = workspace:GetServerTimeNow()
+	local wallOk, wallErr = pcall(self.Wall.Render, self.Wall, self.WallZone, now)
+	if not wallOk then
+		warn("[RoyaleUI] zone wall:", wallErr)
+	end
 	local zone = self.Overlay.Visible and self.Zone
 	local character = player.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart")
 	local outside = false
 	if zone and root then
-		outside = (Vector3.new(root.Position.X, 0, root.Position.Z) - Vector3.new(zone.X, 0, zone.Z)).Magnitude > zone.Radius
+		local zx, zz, radius = ZoneMath.At(zone, now)
+		outside = (Vector3.new(root.Position.X, 0, root.Position.Z) - Vector3.new(zx, 0, zz)).Magnitude > radius
 	end
 	self.OutWarning.Visible = outside
 	self.OutVignette.BackgroundTransparency = outside and (0.72 + 0.08 * math.sin(os.clock() * 5)) or 1

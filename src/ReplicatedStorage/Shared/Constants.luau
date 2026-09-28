@@ -157,11 +157,12 @@ Constants.Royale = {
 	ZONE_START_DELAY = 70, -- seconds before the first shrink starts
 	-- each phase: wait, then shrink over Shrink seconds to Radius (fraction of the map radius)
 	ZONE_PHASES = {
+		-- storm damage (% of max HP per second) doubles every phase
 		{ Wait = 0, Shrink = 50, Radius = 0.62, DamagePercent = 0.02 },
-		{ Wait = 45, Shrink = 40, Radius = 0.38, DamagePercent = 0.03 },
-		{ Wait = 40, Shrink = 35, Radius = 0.2, DamagePercent = 0.05 },
-		{ Wait = 35, Shrink = 30, Radius = 0.08, DamagePercent = 0.08 },
-		{ Wait = 30, Shrink = 30, Radius = 0.0, DamagePercent = 0.12 },
+		{ Wait = 45, Shrink = 40, Radius = 0.38, DamagePercent = 0.04 },
+		{ Wait = 40, Shrink = 35, Radius = 0.2, DamagePercent = 0.08 },
+		{ Wait = 35, Shrink = 30, Radius = 0.08, DamagePercent = 0.16 },
+		{ Wait = 30, Shrink = 30, Radius = 0.0, DamagePercent = 0.32 },
 	},
 	ZONE_TICK = 0.5,
 }

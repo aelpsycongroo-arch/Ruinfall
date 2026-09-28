@@ -11,6 +11,7 @@ local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Constants = require(Shared:WaitForChild("Constants"))
+local ZoneMath = require(Shared:WaitForChild("ZoneMath"))
 local UITheme = require(script.Parent:WaitForChild("UITheme"))
 
 -- Constants
@@ -202,7 +203,8 @@ local function updateDynamic()
 			ringFrame.Size = UDim2.fromOffset(radius * 2 * scale, radius * 2 * scale)
 		end
 		zoneRing("ZoneNext", Color3.fromRGB(245, 245, 255), zone.NextX, zone.NextZ, zone.NextRadius, 1)
-		zoneRing("Zone", Color3.fromRGB(190, 110, 255), zone.X, zone.Z, zone.Radius, 2)
+		local zx, zz, zoneRadius = ZoneMath.At(zone, workspace:GetServerTimeNow())
+		zoneRing("Zone", Color3.fromRGB(190, 110, 255), zx, zz, zoneRadius, 2)
 		for _, chest in ipairs(royale.Loot or {}) do
 			local icon = acquire("Loot", diamondFactory(7))
 			icon.Position = toMap(chest.Position)

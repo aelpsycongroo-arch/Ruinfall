@@ -78,6 +78,7 @@ function AbilityBar.new(group, clientState, combatController)
 		Sub = find(group, "SlotTooltip.Sub", "TextLabel"), Body = find(group, "SlotTooltip.Body", "TextLabel"),
 	}
 	self.Tooltip.Frame.Visible = false
+	self:StyleTooltip()
 	self:SetupDragging()
 	return self
 end
@@ -252,6 +253,42 @@ function AbilityBar:Tick(character, now, me)
 	self:UpdateTooltip()
 end
 
+-- The tooltip in the place shrinks its text to fit a small fixed box (unreadable for long
+-- passives). Use a wider box with fixed, readable text sizes that grows upward to fit the text.
+local TIP_WIDTH, TIP_PAD, TIP_BODY_TOP = 400, 12, 58
+function AbilityBar:StyleTooltip()
+	local tip = self.Tooltip
+	tip.Frame.AnchorPoint = Vector2.new(1, 1)
+	tip.Frame.Position = UDim2.new(1, 0, 0, -8)
+	tip.Frame.ZIndex = math.max(tip.Frame.ZIndex, 20)
+	local function style(label, top, height, size)
+		label.TextScaled = false
+		label.TextSize = size
+		label.TextWrapped = true
+		label.Position = UDim2.fromOffset(TIP_PAD, top)
+		label.Size = UDim2.new(1, -TIP_PAD * 2, 0, height)
+		label.ZIndex = tip.Frame.ZIndex + 1
+		local constraint = label:FindFirstChildOfClass("UITextSizeConstraint")
+		if constraint then
+			constraint:Destroy()
+		end
+	end
+	style(tip.Title, 8, 24, 21)
+	style(tip.Sub, 34, 18, 14)
+	style(tip.Body, TIP_BODY_TOP, 40, 16)
+	tip.Body.TextYAlignment = Enum.TextYAlignment.Top
+	self:FitTooltip()
+end
+
+function AbilityBar:FitTooltip()
+	local tip = self.Tooltip
+	local width = TIP_WIDTH - TIP_PAD * 2
+	tip.Body.Size = UDim2.new(1, -TIP_PAD * 2, 0, 1000)
+	local height = math.max(20, tip.Body.TextBounds.Y)
+	tip.Body.Size = UDim2.new(1, -TIP_PAD * 2, 0, height + 4)
+	tip.Frame.Size = UDim2.fromOffset(width + TIP_PAD * 2, TIP_BODY_TOP + height + 14)
+end
+
 -- hover tooltip for the boots cell and the passive cells (mouse position, checked per frame)
 function AbilityBar:UpdateTooltip()
 	local hovered, kind = nil, nil
@@ -312,6 +349,12 @@ function AbilityBar:UpdateTooltip()
 			tip.Body.Text = "Empty. Passive items bought in the shop (B) go here automatically - up to 3."
 		end
 	end
+	self:FitTooltip()
+	task.defer(function() -- TextBounds of RichText settles after layout
+		if self.TooltipKey == key then
+			self:FitTooltip()
+		end
+	end)
 end
 
 return AbilityBar

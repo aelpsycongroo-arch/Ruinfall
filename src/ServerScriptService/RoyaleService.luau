@@ -29,11 +29,6 @@ local LootService = require(script.Parent:WaitForChild("LootService"))
 
 -- Constants
 local ROYALE = Constants.Royale
-local WALL_SEGMENTS = 96
-local WALL_HEIGHT = 160
-local ZONE_COLOR = Color3.fromRGB(170, 80, 255)
-local EDGE_COLOR = Color3.fromRGB(220, 150, 255)
-local NEXT_COLOR = Color3.fromRGB(245, 245, 255)
 
 -- State
 local RoyaleService = {}
@@ -44,8 +39,6 @@ RoyaleService.Zone = nil -- { Center, Radius, From*, To*, Phase, State, PhaseEnd
 
 local random = Random.new()
 local runId = 0
-local wallFolder = nil
-local wallSegments = {} -- { Field, Sheet, Edge, Next }
 local lootTable = nil
 local nextRuinAt = 0
 local initialized = false
@@ -145,81 +138,6 @@ local function zoneAt(now)
 	return zone.Center, zone.Radius
 end
 
-local function wallPart(name, material, color, transparency)
-	local part = Instance.new("Part")
-	part.Name = name
-	part.Anchored = true
-	part.CanCollide = false
-	part.CanQuery = false
-	part.CanTouch = false
-	part.CastShadow = false
-	part.Material = material
-	part.Color = color
-	part.Transparency = transparency
-	part.Parent = wallFolder
-	return part
-end
-
--- The zone: a tall shimmering storm wall (force field + tinted glow sheet), a bright glowing
--- line on the ground where the safe area ends, and a white ground ring marking the NEXT zone.
-local function buildWall()
-	wallFolder = Instance.new("Folder")
-	wallFolder.Name = "ZoneWall"
-	wallFolder.Parent = MapGenerator.Current and MapGenerator.Current.Folder or workspace
-	table.clear(wallSegments)
-	for index = 1, WALL_SEGMENTS do
-		wallSegments[index] = {
-			Field = wallPart("ZoneField", Enum.Material.ForceField, ZONE_COLOR, 0),
-			Sheet = wallPart("ZoneSheet", Enum.Material.Neon, ZONE_COLOR, 0.8),
-			Edge = wallPart("ZoneEdge", Enum.Material.Neon, EDGE_COLOR, 0),
-			Next = wallPart("NextZoneEdge", Enum.Material.Neon, NEXT_COLOR, 0.35),
-		}
-	end
-end
-
-local function placeRing(key, center, radius, height, thickness, y)
-	local width = 2 * math.pi * math.max(radius, 0.5) / WALL_SEGMENTS + 0.6
-	for index, segment in ipairs(wallSegments) do
-		local part = segment[key]
-		if radius < 1 then
-			part.Transparency = 1
-		else
-			local angle = (index - 0.5) * 2 * math.pi / WALL_SEGMENTS
-			local position = center + Util.RotateY(Vector3.new(0, 0, radius), angle)
-			part.Size = Vector3.new(width, height, thickness)
-			part.CFrame = CFrame.lookAt(Vector3.new(position.X, y, position.Z), Vector3.new(center.X, y, center.Z))
-		end
-	end
-end
-
-local function updateWall(center, radius, nextCenter, nextRadius)
-	if not wallFolder then
-		return
-	end
-	placeRing("Field", center, radius, WALL_HEIGHT, 1, WALL_HEIGHT / 2 - 1)
-	placeRing("Sheet", center, radius - 0.6, WALL_HEIGHT, 0.4, WALL_HEIGHT / 2 - 1)
-	placeRing("Edge", center, radius - 0.4, 0.6, 1.6, 0.3)
-	local zone = RoyaleService.Zone
-	local showNext = nextRadius and zone and zone.State ~= "Final" and nextRadius < radius - 1
-	if showNext then
-		placeRing("Next", nextCenter, nextRadius, 0.35, 0.9, 0.2)
-		for _, segment in ipairs(wallSegments) do
-			segment.Next.Transparency = 0.35
-		end
-	else
-		for _, segment in ipairs(wallSegments) do
-			segment.Next.Transparency = 1
-		end
-	end
-	for _, segment in ipairs(wallSegments) do
-		if radius >= 1 then
-			segment.Field.Transparency = 0
-			segment.Sheet.Transparency = 0.8
-			segment.Edge.Transparency = 0
-		end
-	end
-end
-
 -- the next circle lies fully inside the current one
 local function pickNextCenter(center, radius, nextRadius)
 	local slack = math.max(0, radius - nextRadius)
@@ -262,8 +180,8 @@ local function tickZone(now)
 			Net.Notify(nil, string.format("Zone stable - next shrink in %ds", math.floor(zone.PhaseEndsAt - now)), "Warning")
 		end
 	end
+	-- the storm wall itself is drawn by every client (ZoneWall), moving smoothly each frame
 	local center, radius = zoneAt(now)
-	updateWall(center, radius, zone.NextCenter, zone.NextRadius)
 	-- storm damage (true damage, % of max health per second)
 	for _, participant in ipairs(PlayerService.GetParticipants()) do
 		local entity = participant.Entity
@@ -392,8 +310,6 @@ function RoyaleService.Setup(mapData, seed)
 	RoyaleService.Zone = {
 		Center = Vector3.zero, Radius = mapData.Radius, Phase = 0, State = "Idle", PhaseEndsAt = 0, DamagePercent = 0,
 	}
-	buildWall()
-	updateWall(Vector3.zero, mapData.Radius, nil, nil)
 end
 
 function RoyaleService.Start()
@@ -431,11 +347,6 @@ function RoyaleService.Cleanup()
 	table.clear(RoyaleService.Picks)
 	RoyaleService.Zone = nil
 	RoyaleService.DeployEndsAt = 0
-	if wallFolder then
-		wallFolder:Destroy()
-		wallFolder = nil
-	end
-	table.clear(wallSegments)
 end
 
 -- zone info for bots (current circle and where it is heading)
@@ -467,6 +378,11 @@ function RoyaleService.Serialize()
 			NextRadius = zone.NextRadius or radius, State = zone.State, Phase = zone.Phase, PhaseEndsAt = zone.PhaseEndsAt,
 			PhaseCount = #ROYALE.ZONE_PHASES,
 		}
+		if zone.State == "Shrinking" then -- lets clients move the zone smoothly (Shared.ZoneMath)
+			zoneInfo.FromX, zoneInfo.FromZ, zoneInfo.FromRadius = zone.FromCenter.X, zone.FromCenter.Z, zone.FromRadius
+			zoneInfo.ToX, zoneInfo.ToZ, zoneInfo.ToRadius = zone.ToCenter.X, zone.ToCenter.Z, zone.ToRadius
+			zoneInfo.ShrinkStart, zoneInfo.ShrinkEnd = zone.PhaseEndsAt - zone.ShrinkTime, zone.PhaseEndsAt
+		end
 	end
 	local alive = RoyaleService.CountAlive()
 	return {
