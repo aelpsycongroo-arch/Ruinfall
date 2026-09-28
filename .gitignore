@@ -18,3 +18,4 @@ Thumbs.db
 /Packages/
 /ServerPackages/
 /DevPackages/
+__pycache__/
