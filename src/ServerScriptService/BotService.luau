@@ -166,6 +166,9 @@ local function tryAbility(brain, target, isHero)
 		return
 	end
 	local ability = entity.Class.Ability
+	if not ability then
+		return -- Royale Wanderer without a looted skill
+	end
 	local position = CombatService.GetPosition(entity)
 	local targetPosition = CombatService.GetPosition(target)
 	local distance = Util.FlatDistance(position, targetPosition)
@@ -193,6 +196,9 @@ end
 local function tryEscape(brain, threat)
 	local entity = brain.Entity
 	if not AbilityService.IsReady(entity) or not threat then
+		return
+	end
+	if not entity.Class.Ability then
 		return
 	end
 	local key = entity.Class.Ability.Key
@@ -379,6 +385,113 @@ local function chooseStrategy(brain, now)
 end
 
 ----------------------------------------------------------------------------
+-- Royale (free for all): stay in the zone, loot, fight, drink potions
+----------------------------------------------------------------------------
+-- lazy: RoyaleService / LootService sit above MatchManager in the require graph
+local function royaleModules()
+	return require(script.Parent:WaitForChild("RoyaleService")), require(script.Parent:WaitForChild("LootService"))
+end
+
+local function royaleThink(brain)
+	local Royale, Loot = royaleModules()
+	local entity = brain.Entity
+	local participant = brain.Participant
+	local now = Util.Now()
+	local classDef = entity.Class
+	local position = CombatService.GetPosition(entity)
+	local healthRatio = entity.Health / entity.MaxHealth
+	local zone = Royale.GetZone()
+	local center = zone and zone.Center or Vector3.zero
+	local safeRadius = zone and math.max(4, zone.Radius - 10) or math.huge
+	local inZone = Util.FlatDistance(position, center) <= safeRadius
+	local function insideZone(point)
+		return not zone or Util.FlatDistance(point, center) <= safeRadius
+	end
+
+	-- drink a potion when hurt
+	if healthRatio < 0.55 and (participant.Potions or 0) > 0 then
+		Loot.UsePotion(participant)
+	end
+	-- 1. get back into the zone
+	if not inZone then
+		setState(brain, "Zone")
+		local enemy = selectEnemyHero(brain, position, classDef.AttackRange + 2)
+		if enemy then
+			basicAttack(brain, enemy, CombatService.GetPosition(enemy))
+		end
+		moveTo(brain, zone.NextCenter and zone.NextCenter:Lerp(center, 0.5) or center)
+		return
+	end
+	local engageRange = (classDef.AttackRange + 30) * (0.6 + 0.4 * brain.Difficulty.Aggression)
+	local enemy = selectEnemyHero(brain, position, engageRange)
+	if entity.TauntedUntil > now and entity.TauntedBy and entity.TauntedBy.Alive and entity.TauntedBy.Kind == "Hero" then
+		enemy = entity.TauntedBy
+	end
+	if not enemy then
+		brain.TargetId = nil
+	end
+	-- 2. badly hurt: break away toward the zone centre
+	if enemy and healthRatio < brain.Difficulty.RetreatHealth and (participant.Potions or 0) == 0 then
+		setState(brain, "Flee")
+		tryEscape(brain, enemy)
+		local away = position + Util.FlatDirection(CombatService.GetPosition(enemy), position) * 20
+		moveTo(brain, insideZone(away) and away or center)
+		return
+	end
+	-- 3. fight
+	if enemy then
+		setState(brain, "Fight")
+		engage(brain, enemy)
+		return
+	end
+	-- 4. loot on the ground (a skill first if we have none)
+	local wantsSkill = not classDef.Ability
+	local loot = wantsSkill and Loot.FindNearest(position, 90, function(l)
+		return l.Kind == "Skill" and insideZone(l.Position)
+	end) or nil
+	loot = loot or Loot.FindNearest(position, 60, function(l)
+		return insideZone(l.Position) and (l.Kind ~= "Potion" or (participant.Potions or 0) < Constants.Loot.MAX_POTIONS)
+	end)
+	if loot then
+		setState(brain, "Loot")
+		moveTo(brain, loot.Position)
+		return
+	end
+	-- 5. break a ruin
+	local ruin = nearestRuin(position, 110)
+	if ruin and insideZone(ruin.Position) then
+		setState(brain, "Ruin")
+		attackObjective(brain, ruin.Entity)
+		return
+	end
+	-- 6. farm a camp for potions
+	if healthRatio > 0.6 then
+		local camp = nearestAliveCamp(position, 80)
+		if camp and insideZone(camp.Position) and farmCamp(brain, camp) then
+			return
+		end
+	end
+	-- 7. roam inside the zone, drifting toward where it will shrink
+	if now >= brain.StrategyUntil or not insideZone(brain.RoamPoint) or Util.FlatDistance(position, brain.RoamPoint) < 8 then
+		brain.StrategyUntil = now + random:NextNumber(8, 15)
+		local target = zone and zone.NextCenter or center
+		local spread = zone and math.max(6, math.min(zone.NextRadius or safeRadius, safeRadius) * 0.8) or 60
+		brain.RoamPoint = target + Util.RotateY(Vector3.new(0, 0, random:NextNumber(0, spread)), random:NextNumber(0, math.pi * 2))
+		if not insideZone(brain.RoamPoint) then
+			brain.RoamPoint = center
+		end
+	end
+	local anyRuin = nearestRuin(position)
+	if anyRuin and insideZone(anyRuin.Position) and Util.FlatDistance(position, anyRuin.Position) < 200 then
+		setState(brain, "Seek Ruin")
+		attackObjective(brain, anyRuin.Entity)
+		return
+	end
+	setState(brain, "Roam")
+	moveTo(brain, brain.RoamPoint)
+end
+
+----------------------------------------------------------------------------
 -- Decision making
 ----------------------------------------------------------------------------
 local function think(brain)
@@ -390,6 +503,9 @@ local function think(brain)
 	if CombatService.IsStunned(entity) then
 		setState(brain, "Stunned")
 		return
+	end
+	if entity.ClassKey == "Wanderer" then
+		return royaleThink(brain) -- free-for-all battle royale bots
 	end
 	local difficulty = brain.Difficulty
 	local classDef = entity.Class

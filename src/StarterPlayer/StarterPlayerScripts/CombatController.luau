@@ -460,7 +460,8 @@ function CombatController.TryAbility(slot)
 	-- Q mana cost (class ability ManaCost, e.g. Mage Arcane Burst); the server checks it too
 	local me = ClientState.GetMe()
 	local classDef = me and ClassDefinitions.Get(me.ClassKey)
-	local manaCost = classDef and classDef.Ability and classDef.Ability.ManaCost or 0
+	local ability = me and ClassDefinitions.GetAbility(me.ClassKey, me.Skill) -- Royale: looted skill
+	local manaCost = classDef and ability and ability.ManaCost or 0
 	if manaCost > 0 and (character:GetAttribute("Mana") or 0) < manaCost then
 		ClientState.LocalMessage:Fire("Not enough mana", "Warning")
 		return

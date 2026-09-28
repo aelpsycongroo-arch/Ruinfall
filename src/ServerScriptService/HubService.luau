@@ -22,17 +22,28 @@ local ClassDefinitions = require(Shared:WaitForChild("ClassDefinitions"))
 local Net = require(script.Parent:WaitForChild("Net"))
 
 -- Constants
-local LOBBY_COUNT = 4
-local LOBBY_NAMES = { "LOBBY I", "LOBBY II", "LOBBY III", "LOBBY IV" }
-local LOBBY_TITLES = { "The Iron Gate", "The Ember Gate", "The Frost Gate", "The Verdant Gate" }
-local LOBBY_COLORS = {
-	Color3.fromRGB(255, 190, 90), Color3.fromRGB(235, 90, 60), Color3.fromRGB(110, 190, 255), Color3.fromRGB(110, 220, 120),
+-- One gate per game mode. The CraterArena gate runs the classic team battle (2 / 4 / 6
+-- teams, flags, classes, shop); the Shattered Expanse gate runs the 18-player free-for-all
+-- battle royale (Constants.Royale). Each lobby only offers its own modes.
+local LOBBIES = {
+	{
+		Name = "CRATER ARENA", Title = "The Crater Gate", Color = Color3.fromRGB(255, 150, 70),
+		Modes = { "2Team", "4Team", "6Team" }, Default = "2Team",
+		Blurb = "Team battle in the ancient crater - break enemy flags",
+	},
+	{
+		Name = "SHATTERED EXPANSE", Title = "The Storm Gate", Color = Color3.fromRGB(185, 110, 255),
+		Modes = { "Royale" }, Default = "Royale",
+		Blurb = "18-player free for all - loot ruins, last one standing",
+	},
 }
-local MODES = { "2Team", "4Team", "6Team" }
+local LOBBY_COUNT = #LOBBIES
 local DEFAULT_MODE = "2Team"
 local LAUNCH_TIMEOUT = 25 -- seconds before a stuck launch reopens the lobby
 local REQUEST_INTERVAL = 0.25
 local HALL_FLOOR_Y = 400 -- the hall floats high above the (unused) arena area
+local MARBLE_A, MARBLE_B = Color3.fromRGB(196, 186, 170), Color3.fromRGB(88, 80, 74)
+local GOLD = Color3.fromRGB(214, 170, 80)
 
 -- State
 local HubService = {}
@@ -120,50 +131,232 @@ local function pillar(position, height)
 	part({ Name = "PillarCap", Size = Vector3.new(5, 1.2, 5), Position = position + Vector3.new(0, height - 0.6, 0), Color = Color3.fromRGB(120, 112, 100), Material = Enum.Material.Limestone })
 end
 
+local function neon(properties)
+	properties.Material = Enum.Material.Neon
+	properties.CanCollide = false
+	properties.CastShadow = false
+	return part(properties)
+end
+
+-- a ring of blocks approximating an arch between two pillars (x0..x1 at height y, radius r)
+-- alongZ: the arch spans the Z axis (windows in the side walls) instead of X
+local function archOver(center, halfWidth, springY, thickness, depth, color, material, segments, alongZ)
+	segments = segments or 9
+	local blocks = {}
+	local function point(a)
+		local h, v = -math.cos(a) * halfWidth, math.sin(a) * halfWidth
+		return alongZ and Vector3.new(0, v, h) or Vector3.new(h, v, 0)
+	end
+	for index = 0, segments - 1 do
+		local a0 = math.pi * index / segments
+		local a1 = math.pi * (index + 1) / segments
+		local p0 = point(a0)
+		local p1 = point(a1)
+		local mid = (p0 + p1) / 2
+		local length = (p1 - p0).Magnitude + 0.3
+		local tangent = (p1 - p0).Unit
+		local outward = mid.Unit -- from the arch centre through this stone
+		local cf = CFrame.fromMatrix(center + Vector3.new(0, springY, 0) + mid, tangent, outward)
+		table.insert(blocks, part({ Name = "ArchStone", Size = Vector3.new(length, thickness, depth), CFrame = cf, Color = color, Material = material or Enum.Material.Limestone }))
+	end
+	return blocks
+end
+
+local function chandelier(position)
+	local metal = Color3.fromRGB(60, 50, 40)
+	part({ Name = "Chain", Size = Vector3.new(0.3, 8, 0.3), Position = position + Vector3.new(0, 4.5, 0), Color = metal, Material = Enum.Material.Metal, CanCollide = false })
+	part({ Name = "ChandelierRing", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.5, 9, 9), CFrame = CFrame.new(position) * CFrame.Angles(0, 0, math.rad(90)), Color = metal, Material = Enum.Material.Metal, CanCollide = false })
+	for index = 1, 8 do
+		local angle = index / 8 * math.pi * 2
+		local spot = position + Vector3.new(math.cos(angle) * 4.2, 0.6, math.sin(angle) * 4.2)
+		part({ Name = "Candle", Size = Vector3.new(0.35, 0.9, 0.35), Position = spot, Color = Color3.fromRGB(240, 230, 200), Material = Enum.Material.SmoothPlastic, CanCollide = false })
+		local flame = neon({ Name = "Flame", Size = Vector3.new(0.22, 0.4, 0.22), Position = spot + Vector3.new(0, 0.65, 0), Color = Color3.fromRGB(255, 190, 90) })
+		if index % 2 == 0 then
+			local light = Instance.new("PointLight")
+			light.Color = Color3.fromRGB(255, 190, 110)
+			light.Range = 22
+			light.Brightness = 1.1
+			light.Parent = flame
+		end
+	end
+end
+
+local function brazier(position, color)
+	part({ Name = "BrazierFoot", Size = Vector3.new(2.6, 0.6, 2.6), Position = position + Vector3.new(0, 0.3, 0), Color = Color3.fromRGB(50, 44, 40), Material = Enum.Material.Metal })
+	part({ Name = "BrazierStem", Size = Vector3.new(0.8, 3, 0.8), Position = position + Vector3.new(0, 2.1, 0), Color = Color3.fromRGB(50, 44, 40), Material = Enum.Material.Metal })
+	local bowl = part({ Name = "BrazierBowl", Shape = Enum.PartType.Cylinder, Size = Vector3.new(1.2, 3.6, 3.6), CFrame = CFrame.new(position + Vector3.new(0, 4, 0)) * CFrame.Angles(0, 0, math.rad(90)), Color = Color3.fromRGB(70, 60, 50), Material = Enum.Material.Metal })
+	local fire = Instance.new("Fire")
+	fire.Size = 5
+	fire.Heat = 9
+	fire.Color = color or Color3.fromRGB(255, 150, 50)
+	fire.SecondaryColor = (color or Color3.fromRGB(255, 150, 50)):Lerp(Color3.new(1, 0.2, 0), 0.5)
+	fire.Parent = bowl
+	local light = Instance.new("PointLight")
+	light.Color = color or Color3.fromRGB(255, 170, 90)
+	light.Range = 24
+	light.Brightness = 1.8
+	light.Shadows = true
+	light.Parent = bowl
+end
+
+local function dustMotes(parent, color, rate)
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	emitter.Color = ColorSequence.new(color)
+	emitter.LightEmission = 0.8
+	emitter.Size = NumberSequence.new(0.15, 0.05)
+	emitter.Transparency = NumberSequence.new(0.3, 1)
+	emitter.Lifetime = NumberRange.new(4, 8)
+	emitter.Rate = rate or 12
+	emitter.Speed = NumberRange.new(0.4, 1.2)
+	emitter.SpreadAngle = Vector2.new(180, 180)
+	emitter.Parent = parent
+end
+
 local function buildHall()
 	hallFolder = Instance.new("Folder")
 	hallFolder.Name = "RuinfallHall"
 	hallFolder.Parent = workspace
 	local y = HALL_FLOOR_Y
-	local width, depth, height = 120, 96, 30
-	local stone = Color3.fromRGB(96, 90, 84)
-	-- floor, rug, walls
-	part({ Name = "Floor", Size = Vector3.new(width, 2, depth), Position = Vector3.new(0, y - 1, 0), Color = Color3.fromRGB(88, 82, 76), Material = Enum.Material.Slate })
-	part({ Name = "FloorTrim", Size = Vector3.new(width - 8, 0.1, depth - 8), Position = Vector3.new(0, y + 0.02, 0), Color = Color3.fromRGB(110, 100, 88), Material = Enum.Material.Cobblestone })
-	part({ Name = "Rug", Size = Vector3.new(16, 0.12, depth - 20), Position = Vector3.new(0, y + 0.1, 4), Color = Color3.fromRGB(120, 24, 28), Material = Enum.Material.Fabric })
-	part({ Name = "RugBorderL", Size = Vector3.new(0.8, 0.14, depth - 20), Position = Vector3.new(-8, y + 0.11, 4), Color = Color3.fromRGB(200, 160, 70), Material = Enum.Material.Fabric })
-	part({ Name = "RugBorderR", Size = Vector3.new(0.8, 0.14, depth - 20), Position = Vector3.new(8, y + 0.11, 4), Color = Color3.fromRGB(200, 160, 70), Material = Enum.Material.Fabric })
-	part({ Name = "WallBack", Size = Vector3.new(width, height, 3), Position = Vector3.new(0, y + height / 2, -depth / 2 - 1.5), Color = stone, Material = Enum.Material.Cobblestone })
-	part({ Name = "WallFront", Size = Vector3.new(width, height, 3), Position = Vector3.new(0, y + height / 2, depth / 2 + 1.5), Color = stone, Material = Enum.Material.Cobblestone })
-	part({ Name = "WallLeft", Size = Vector3.new(3, height, depth + 6), Position = Vector3.new(-width / 2 - 1.5, y + height / 2, 0), Color = stone, Material = Enum.Material.Cobblestone })
-	part({ Name = "WallRight", Size = Vector3.new(3, height, depth + 6), Position = Vector3.new(width / 2 + 1.5, y + height / 2, 0), Color = stone, Material = Enum.Material.Cobblestone })
-	-- roof beams (open roof lets the sun in)
-	for z = -depth / 2 + 8, depth / 2 - 8, 14 do
-		part({ Name = "Beam", Size = Vector3.new(width + 6, 1.6, 2), Position = Vector3.new(0, y + height - 1, z), Color = Color3.fromRGB(70, 48, 30), Material = Enum.Material.Wood })
-	end
-	-- colonnades + torches
-	for _, x in ipairs({ -34, 34 }) do
-		for _, z in ipairs({ -22, -4, 14, 32 }) do
-			pillar(Vector3.new(x, y, z), height - 2)
+	local width, depth, height = 140, 110, 44
+	local stone = Color3.fromRGB(104, 96, 88)
+	local stoneDark = Color3.fromRGB(70, 64, 60)
+	local backZ = -depth / 2
+
+	-- Floor: chequered marble with a gold-inlaid mosaic compass in the middle ----------------
+	part({ Name = "Floor", Size = Vector3.new(width, 2, depth), Position = Vector3.new(0, y - 1, 0), Color = stoneDark, Material = Enum.Material.Slate })
+	local tile = 10
+	for ix = 0, width / tile - 1 do
+		for iz = 0, depth / tile - 1 do
+			local x = -width / 2 + tile / 2 + ix * tile
+			local z = -depth / 2 + tile / 2 + iz * tile
+			part({ Name = "Tile", Size = Vector3.new(tile - 0.25, 0.1, tile - 0.25), Position = Vector3.new(x, y + 0.03, z), Color = (ix + iz) % 2 == 0 and MARBLE_A or MARBLE_B, Material = Enum.Material.Marble })
 		end
 	end
-	for _, x in ipairs({ -width / 2 + 2, width / 2 - 2 }) do
+	local centerZ = 6
+	part({ Name = "MosaicBase", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.12, 40, 40), CFrame = CFrame.new(0, y + 0.07, centerZ) * CFrame.Angles(0, 0, math.rad(90)), Color = Color3.fromRGB(40, 34, 44), Material = Enum.Material.Marble })
+	for _, r in ipairs({ 19.4, 15, 10 }) do
+		neon({ Name = "MosaicRing", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.14, r * 2, r * 2), CFrame = CFrame.new(0, y + 0.08, centerZ) * CFrame.Angles(0, 0, math.rad(90)), Color = GOLD, Transparency = 0.2 })
+		part({ Name = "MosaicRingInner", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.15, r * 2 - 0.7, r * 2 - 0.7), CFrame = CFrame.new(0, y + 0.085, centerZ) * CFrame.Angles(0, 0, math.rad(90)), Color = Color3.fromRGB(40, 34, 44), Material = Enum.Material.Marble })
+	end
+	for index = 0, 7 do -- compass star
+		local long = index % 2 == 0 and 19 or 12
+		part({ Name = "MosaicRay", Size = Vector3.new(index % 2 == 0 and 1.6 or 1, 0.16, long), CFrame = CFrame.new(0, y + 0.1, centerZ) * CFrame.Angles(0, math.rad(index * 45), 0) * CFrame.new(0, 0, -long / 2), Color = index % 2 == 0 and GOLD or Color3.fromRGB(150, 120, 190), Material = Enum.Material.Metal })
+	end
+
+	-- Walls: dressed stone with pilasters, a dado of dark stone and a cornice ------------------
+	local function wall(name, size, position)
+		part({ Name = name, Size = size, Position = position, Color = stone, Material = Enum.Material.Cobblestone })
+	end
+	wall("WallBack", Vector3.new(width, height, 3), Vector3.new(0, y + height / 2, backZ - 1.5))
+	wall("WallFront", Vector3.new(width, height, 3), Vector3.new(0, y + height / 2, depth / 2 + 1.5))
+	wall("WallLeft", Vector3.new(3, height, depth + 6), Vector3.new(-width / 2 - 1.5, y + height / 2, 0))
+	wall("WallRight", Vector3.new(3, height, depth + 6), Vector3.new(width / 2 + 1.5, y + height / 2, 0))
+	for _, side in ipairs({ -1, 1 }) do
+		part({ Name = "Dado", Size = Vector3.new(0.6, 5, depth), Position = Vector3.new(side * (width / 2 - 0.3), y + 2.5, 0), Color = stoneDark, Material = Enum.Material.Slate })
+		part({ Name = "Cornice", Size = Vector3.new(2, 1.6, depth), Position = Vector3.new(side * (width / 2 - 1), y + height - 7, 0), Color = Color3.fromRGB(150, 140, 125), Material = Enum.Material.Limestone })
+	end
+	part({ Name = "DadoFront", Size = Vector3.new(width, 5, 0.6), Position = Vector3.new(0, y + 2.5, depth / 2 - 0.3), Color = stoneDark, Material = Enum.Material.Slate })
+
+	-- Stained-glass windows along both side walls, casting coloured light -------------------
+	local glass = { Color3.fromRGB(200, 60, 60), Color3.fromRGB(60, 110, 220), Color3.fromRGB(230, 180, 60), Color3.fromRGB(80, 170, 90), Color3.fromRGB(150, 80, 220) }
+	for _, side in ipairs({ -1, 1 }) do
+		for index, z in ipairs({ -32, -11, 10, 31 }) do
+			local x = side * (width / 2 - 0.2)
+			local color = glass[(index + (side > 0 and 2 or 0) - 1) % #glass + 1]
+			local pane = part({ Name = "StainedGlass", Size = Vector3.new(0.3, 16, 7), Position = Vector3.new(x, y + 21, z), Color = color, Material = Enum.Material.Glass, Transparency = 0.15, CanCollide = false })
+			pane.Reflectance = 0.1
+			neon({ Name = "GlassGlow", Size = Vector3.new(0.2, 15, 6), Position = Vector3.new(x + side * 0.15, y + 21, z), Color = color, Transparency = 0.55 })
+			part({ Name = "Mullion", Size = Vector3.new(0.5, 16, 0.4), Position = Vector3.new(x - side * 0.1, y + 21, z), Color = Color3.fromRGB(40, 36, 34), Material = Enum.Material.Metal, CanCollide = false })
+			part({ Name = "Transom", Size = Vector3.new(0.5, 0.4, 7), Position = Vector3.new(x - side * 0.1, y + 24, z), Color = Color3.fromRGB(40, 36, 34), Material = Enum.Material.Metal, CanCollide = false })
+			archOver(Vector3.new(x - side * 0.2, y, z), 3.9, 29, 1.2, 1.6, Color3.fromRGB(150, 140, 125), Enum.Material.Limestone, 7, true)
+			for _, dz in ipairs({ -4.2, 4.2 }) do
+				part({ Name = "Pilaster", Size = Vector3.new(1.4, height - 8, 2), Position = Vector3.new(side * (width / 2 - 0.7), y + (height - 8) / 2, z + dz), Color = Color3.fromRGB(135, 126, 112), Material = Enum.Material.Limestone })
+			end
+			local spot = Instance.new("SpotLight")
+			spot.Color = color
+			spot.Brightness = 3
+			spot.Range = 40
+			spot.Angle = 50
+			spot.Face = side < 0 and Enum.NormalId.Right or Enum.NormalId.Left
+			spot.Parent = pane
+		end
+	end
+
+	-- Vaulted ceiling: ribbed arches across the hall + a skylight over the fountain ----------
+	part({ Name = "Roof", Size = Vector3.new(width + 6, 2, depth + 6), Position = Vector3.new(0, y + height + 13, 0), Color = stoneDark, Material = Enum.Material.Slate })
+	for z = backZ + 8, depth / 2 - 6, 16 do
+		archOver(Vector3.new(0, y, z), width / 2, height - 6, 2, 2.4, Color3.fromRGB(120, 110, 98), Enum.Material.Limestone, 14)
+	end
+	part({ Name = "Ridge", Size = Vector3.new(2, 2, depth), Position = Vector3.new(0, y + height + 13.5 - 1.5, 0), Color = Color3.fromRGB(80, 56, 36), Material = Enum.Material.Wood })
+	local shaft = neon({ Name = "Skylight", Shape = Enum.PartType.Cylinder, Size = Vector3.new(height + 12, 16, 16), CFrame = CFrame.new(0, y + (height + 12) / 2, centerZ) * CFrame.Angles(0, 0, math.rad(90)), Color = Color3.fromRGB(255, 235, 190), Transparency = 0.93 })
+	dustMotes(shaft, Color3.fromRGB(255, 230, 170), 18)
+	for _, z in ipairs({ -26, centerZ + 20, 38 }) do
+		for _, x in ipairs({ -30, 30 }) do
+			chandelier(Vector3.new(x, y + height - 12, z))
+		end
+	end
+
+	-- Colonnade with carved capitals -----------------------------------------------------------
+	for _, x in ipairs({ -40, 40 }) do
 		for _, z in ipairs({ -30, -10, 10, 30 }) do
-			torch(Vector3.new(x, y + 7, z))
+			pillar(Vector3.new(x, y, z), height - 6)
+			part({ Name = "Capital", Size = Vector3.new(6.5, 1.4, 6.5), Position = Vector3.new(x, y + height - 7.2, z), Color = GOLD, Material = Enum.Material.Metal })
+			part({ Name = "PillarBand", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.6, 4.1, 4.1), CFrame = CFrame.new(x, y + 6, z) * CFrame.Angles(0, 0, math.rad(90)), Color = GOLD, Material = Enum.Material.Metal })
 		end
 	end
-	-- title board above the gates
-	local title = part({ Name = "TitleBoard", Size = Vector3.new(56, 7, 0.6), Position = Vector3.new(0, y + 24, -depth / 2 + 0.4), Color = Color3.fromRGB(60, 38, 24), Material = Enum.Material.Wood })
+	for _, side in ipairs({ -1, 1 }) do
+		for _, z in ipairs({ -20, 0, 20 }) do
+			torch(Vector3.new(side * (width / 2 - 2), y + 8, z))
+		end
+	end
+
+	-- Centrepiece: fountain with a floating Ruinfall crystal ----------------------------------
+	part({ Name = "FountainRim", Shape = Enum.PartType.Cylinder, Size = Vector3.new(2, 20, 20), CFrame = CFrame.new(0, y + 1, centerZ) * CFrame.Angles(0, 0, math.rad(90)), Color = Color3.fromRGB(170, 160, 145), Material = Enum.Material.Marble })
+	part({ Name = "FountainWater", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.3, 17.6, 17.6), CFrame = CFrame.new(0, y + 1.8, centerZ) * CFrame.Angles(0, 0, math.rad(90)), Color = Color3.fromRGB(60, 130, 170), Material = Enum.Material.Glass, Transparency = 0.35, CanCollide = false })
+	part({ Name = "FountainPlinth", Size = Vector3.new(4, 7, 4), Position = Vector3.new(0, y + 3.5, centerZ), Color = Color3.fromRGB(150, 140, 125), Material = Enum.Material.Marble })
+	part({ Name = "PlinthCap", Size = Vector3.new(5.2, 0.8, 5.2), Position = Vector3.new(0, y + 7.2, centerZ), Color = GOLD, Material = Enum.Material.Metal })
+	local crystal = neon({ Name = "HallCrystal", Size = Vector3.new(3, 6, 3), CFrame = CFrame.new(0, y + 13, centerZ) * CFrame.Angles(0, math.rad(45), 0), Color = Color3.fromRGB(150, 110, 255), Transparency = 0.1 })
+	local glow = Instance.new("PointLight")
+	glow.Color = Color3.fromRGB(170, 130, 255)
+	glow.Range = 34
+	glow.Brightness = 2.2
+	glow.Parent = crystal
+	dustMotes(crystal, Color3.fromRGB(190, 160, 255), 20)
+	for index = 1, 4 do
+		local angle = index / 4 * math.pi * 2
+		neon({ Name = "CrystalShard", Size = Vector3.new(0.8, 2, 0.8), CFrame = CFrame.new(math.cos(angle) * 4.5, y + 12 + (index % 2) * 1.5, centerZ + math.sin(angle) * 4.5) * CFrame.Angles(0.3, angle, 0.2), Color = Color3.fromRGB(200, 170, 255), Transparency = 0.15 })
+	end
+	for index = 1, 6 do -- water jets
+		local angle = index / 6 * math.pi * 2
+		local jet = part({ Name = "WaterJet", Size = Vector3.new(0.4, 0.4, 0.4), Position = Vector3.new(math.cos(angle) * 6.5, y + 2, centerZ + math.sin(angle) * 6.5), Transparency = 1, CanCollide = false })
+		local spray = Instance.new("ParticleEmitter")
+		spray.Color = ColorSequence.new(Color3.fromRGB(180, 220, 255))
+		spray.Size = NumberSequence.new(0.35, 0.1)
+		spray.Transparency = NumberSequence.new(0.3, 1)
+		spray.Lifetime = NumberRange.new(0.8, 1.1)
+		spray.Rate = 25
+		spray.Speed = NumberRange.new(9, 11)
+		spray.SpreadAngle = Vector2.new(6, 6)
+		spray.Acceleration = Vector3.new(0, -22, 0)
+		spray.EmissionDirection = Enum.NormalId.Top
+		spray.Parent = jet
+	end
+
+	-- Title board above the gates ---------------------------------------------------------------
+	local title = part({ Name = "TitleBoard", Size = Vector3.new(64, 8, 0.6), Position = Vector3.new(0, y + 33, backZ + 0.4), Color = Color3.fromRGB(50, 32, 22), Material = Enum.Material.Wood })
+	part({ Name = "TitleFrame", Size = Vector3.new(66, 9.6, 0.4), Position = Vector3.new(0, y + 33, backZ + 0.2), Color = GOLD, Material = Enum.Material.Metal })
 	surfaceText(title, Enum.NormalId.Back, {
 		{ Text = "RUINFALL", Position = UDim2.fromScale(0.05, 0.02), Size = UDim2.fromScale(0.9, 0.62), Font = Enum.Font.Fondamento },
-		{ Text = "Choose a gate to gather your war party", Position = UDim2.fromScale(0.1, 0.64), Size = UDim2.fromScale(0.8, 0.3), Font = Enum.Font.Merriweather, Color = Color3.fromRGB(230, 210, 180) },
+		{ Text = "Choose your battle", Position = UDim2.fromScale(0.1, 0.64), Size = UDim2.fromScale(0.8, 0.3), Font = Enum.Font.Merriweather, Color = Color3.fromRGB(230, 210, 180) },
 	})
-	-- class banners (rendered class emblems) along the side walls
+
+	-- Class banners along the side walls (between the windows) ----------------------------------
 	for index, classKey in ipairs(ClassDefinitions.Order) do
 		local classDef = ClassDefinitions.Get(classKey)
 		local side = index % 2 == 1 and -1 or 1
-		local z = -26 + (index - 1) * 13
-		local banner = part({ Name = "Banner_" .. classKey, Size = Vector3.new(0.3, 12, 6), Position = Vector3.new(side * (width / 2 - 0.4), y + 16, z), Color = classDef.Color:Lerp(Color3.new(0, 0, 0), 0.35), Material = Enum.Material.Fabric })
+		local z = -42 + (index - 1) * 21
+		local banner = part({ Name = "Banner_" .. classKey, Size = Vector3.new(0.3, 12, 6), Position = Vector3.new(side * (width / 2 - 0.9), y + 12, z), Color = classDef.Color:Lerp(Color3.new(0, 0, 0), 0.35), Material = Enum.Material.Fabric, CanCollide = false })
 		local gui = Instance.new("SurfaceGui")
 		gui.Face = side < 0 and Enum.NormalId.Right or Enum.NormalId.Left
 		gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
@@ -186,35 +379,81 @@ local function buildHall()
 		name.Size = UDim2.fromScale(0.9, 0.12)
 		name.Position = UDim2.fromScale(0.05, 0.62)
 		name.Parent = gui
-		part({ Name = "BannerRod", Size = Vector3.new(0.5, 0.5, 7), Position = Vector3.new(side * (width / 2 - 0.6), y + 22.2, z), Color = Color3.fromRGB(200, 160, 70), Material = Enum.Material.Metal })
+		part({ Name = "BannerRod", Size = Vector3.new(0.5, 0.5, 7), Position = Vector3.new(side * (width / 2 - 1), y + 18.2, z), Color = GOLD, Material = Enum.Material.Metal, CanCollide = false })
 	end
-	-- lobby gates along the back wall
-	local gateX = { -42, -14, 14, 42 }
+
+	-- Mode gates: grand arches on the back wall ------------------------------------------------
+	local gateX = { -30, 30 }
 	for id = 1, LOBBY_COUNT do
+		local info = LOBBIES[id]
 		local x = gateX[id]
-		local z = -depth / 2 + 3
-		local color = LOBBY_COLORS[id]
+		local z = backZ + 3
+		local color = info.Color
+		local base = Vector3.new(x, y, z)
+		-- stepped dais
+		part({ Name = "GateStep1", Size = Vector3.new(26, 0.6, 12), Position = Vector3.new(x, y + 0.3, z + 3), Color = Color3.fromRGB(150, 140, 125), Material = Enum.Material.Marble })
+		part({ Name = "GateStep2", Size = Vector3.new(22, 0.6, 7), Position = Vector3.new(x, y + 0.9, z + 1), Color = Color3.fromRGB(165, 155, 140), Material = Enum.Material.Marble })
 		for _, side in ipairs({ -1, 1 }) do
-			part({ Name = "GatePillar", Size = Vector3.new(3, 17, 3), Position = Vector3.new(x + side * 6, y + 8.5, z), Color = Color3.fromRGB(130, 122, 110), Material = Enum.Material.Limestone })
+			part({ Name = "GatePillar", Size = Vector3.new(3.6, 20, 3.6), Position = Vector3.new(x + side * 9, y + 10.6, z), Color = Color3.fromRGB(138, 128, 114), Material = Enum.Material.Limestone })
+			part({ Name = "GatePillarCap", Size = Vector3.new(4.6, 1.2, 4.6), Position = Vector3.new(x + side * 9, y + 21.2, z), Color = GOLD, Material = Enum.Material.Metal })
+			part({ Name = "GatePillarBase", Size = Vector3.new(4.6, 1.2, 4.6), Position = Vector3.new(x + side * 9, y + 1.8, z), Color = GOLD, Material = Enum.Material.Metal })
 		end
-		part({ Name = "GateLintel", Size = Vector3.new(15, 3, 3.4), Position = Vector3.new(x, y + 18.5, z), Color = Color3.fromRGB(120, 112, 100), Material = Enum.Material.Limestone })
-		local portal = part({ Name = "Portal", Size = Vector3.new(9, 15, 0.4), Position = Vector3.new(x, y + 7.5, z - 0.6), Color = color, Material = Enum.Material.Neon, Transparency = 0.45, CanCollide = false })
-		local glow = Instance.new("PointLight")
-		glow.Color = color
-		glow.Range = 16
-		glow.Brightness = 1.4
-		glow.Parent = portal
-		local sign = part({ Name = "GateSign", Size = Vector3.new(13, 5, 0.5), Position = Vector3.new(x, y + 12.5, z + 1.9), Color = Color3.fromRGB(56, 36, 22), Material = Enum.Material.Wood })
+		archOver(base, 9, 21.6, 2.4, 3.8, Color3.fromRGB(130, 120, 106), Enum.Material.Limestone, 11)
+		local keystone = neon({ Name = "Keystone", Size = Vector3.new(2.2, 2.6, 4.2), Position = Vector3.new(x, y + 31, z), Color = color, Transparency = 0.1 })
+		local portal = part({ Name = "Portal", Size = Vector3.new(14, 20, 0.4), Position = Vector3.new(x, y + 11.2, z - 0.8), Color = color, Material = Enum.Material.Neon, Transparency = 0.5, CanCollide = false })
+		part({ Name = "PortalVoid", Size = Vector3.new(14.2, 20.2, 0.3), Position = Vector3.new(x, y + 11.2, z - 1.3), Color = Color3.fromRGB(10, 6, 16), Material = Enum.Material.SmoothPlastic, CanCollide = false })
+		local swirl = Instance.new("ParticleEmitter")
+		swirl.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		swirl.Color = ColorSequence.new(color, Color3.new(1, 1, 1))
+		swirl.LightEmission = 1
+		swirl.Size = NumberSequence.new(0.6, 0)
+		swirl.Lifetime = NumberRange.new(1.5, 2.5)
+		swirl.Rate = 30
+		swirl.Speed = NumberRange.new(1, 3)
+		swirl.RotSpeed = NumberRange.new(-90, 90)
+		swirl.SpreadAngle = Vector2.new(60, 60)
+		swirl.EmissionDirection = Enum.NormalId.Back
+		swirl.Parent = portal
+		local glowLight = Instance.new("PointLight")
+		glowLight.Color = color
+		glowLight.Range = 22
+		glowLight.Brightness = 2
+		glowLight.Parent = portal
+		keystone:SetAttribute("Gate", id)
+		-- themed dressing: embers and rocks for the crater, floating storm shards for the expanse
+		if id == 1 then
+			for index = 1, 5 do
+				local side = index % 2 == 0 and -1 or 1
+				part({ Name = "CraterRock", Shape = Enum.PartType.Ball, Size = Vector3.new(2 + index % 3, 1.6 + index % 2, 2 + index % 3), Position = Vector3.new(x + side * (11 + index), y + 0.8, z + 4 + index), Color = Color3.fromRGB(70, 56, 48), Material = Enum.Material.Basalt })
+			end
+			brazier(Vector3.new(x - 13, y, z + 8), Color3.fromRGB(255, 130, 50))
+			brazier(Vector3.new(x + 13, y, z + 8), Color3.fromRGB(255, 130, 50))
+		else
+			for index = 1, 6 do
+				local side = index % 2 == 0 and -1 or 1
+				neon({ Name = "StormShard", Size = Vector3.new(0.9, 3, 0.9), CFrame = CFrame.new(x + side * (12 + index * 0.6), y + 5 + index * 2.4, z + 2) * CFrame.Angles(0.4 * side, index, 0.3), Color = color, Transparency = 0.15 })
+			end
+			brazier(Vector3.new(x - 13, y, z + 8), color)
+			brazier(Vector3.new(x + 13, y, z + 8), color)
+		end
+		-- carpet runner from the fountain to the gate
+		local runnerA = Vector3.new(x * 0.25, y + 0.14, centerZ - 11)
+		local runnerB = Vector3.new(x, y + 0.14, z + 9)
+		part({ Name = "Runner", Size = Vector3.new(7, 0.14, (runnerB - runnerA).Magnitude), CFrame = CFrame.lookAt((runnerA + runnerB) / 2, runnerB), Color = color:Lerp(Color3.new(0.1, 0.05, 0.05), 0.55), Material = Enum.Material.Fabric, CanCollide = false })
+		-- gate sign
+		local sign = part({ Name = "GateSign", Size = Vector3.new(18, 6.4, 0.5), Position = Vector3.new(x, y + 25.5, z + 2.4), Color = Color3.fromRGB(46, 30, 20), Material = Enum.Material.Wood })
+		part({ Name = "GateSignFrame", Size = Vector3.new(19, 7.4, 0.3), Position = Vector3.new(x, y + 25.5, z + 2.1), Color = GOLD, Material = Enum.Material.Metal })
 		local _, labels = surfaceText(sign, Enum.NormalId.Back, {
-			{ Name = "Title", Text = LOBBY_NAMES[id], Position = UDim2.fromScale(0.05, 0.02), Size = UDim2.fromScale(0.9, 0.36), Color = color },
-			{ Name = "Sub", Text = LOBBY_TITLES[id], Position = UDim2.fromScale(0.1, 0.38), Size = UDim2.fromScale(0.8, 0.2), Font = Enum.Font.Merriweather, Color = Color3.fromRGB(230, 210, 180) },
-			{ Name = "Status", Text = "", Position = UDim2.fromScale(0.05, 0.62), Size = UDim2.fromScale(0.9, 0.32), Font = Enum.Font.Merriweather },
+			{ Name = "Title", Text = info.Name, Position = UDim2.fromScale(0.04, 0.02), Size = UDim2.fromScale(0.92, 0.36), Color = color },
+			{ Name = "Sub", Text = info.Blurb, Position = UDim2.fromScale(0.06, 0.4), Size = UDim2.fromScale(0.88, 0.2), Font = Enum.Font.Merriweather, Color = Color3.fromRGB(230, 210, 180) },
+			{ Name = "Status", Text = "", Position = UDim2.fromScale(0.04, 0.63), Size = UDim2.fromScale(0.92, 0.32), Font = Enum.Font.Merriweather },
 		})
-		local pedestal = part({ Name = "GatePedestal", Size = Vector3.new(3.4, 1.4, 3.4), Position = Vector3.new(x, y + 0.7, z + 7), Color = Color3.fromRGB(110, 102, 92), Material = Enum.Material.Limestone })
+		local pedestal = part({ Name = "GatePedestal", Size = Vector3.new(3.6, 3, 3.6), Position = Vector3.new(x, y + 1.5, z + 9), Color = Color3.fromRGB(150, 140, 125), Material = Enum.Material.Marble })
+		neon({ Name = "PedestalRune", Size = Vector3.new(3.7, 0.3, 3.7), Position = Vector3.new(x, y + 2.8, z + 9), Color = color, Transparency = 0.3 })
 		local prompt = Instance.new("ProximityPrompt")
 		prompt.Name = "JoinPrompt"
-		prompt.ActionText = "Join " .. LOBBY_NAMES[id]
-		prompt.ObjectText = LOBBY_TITLES[id]
+		prompt.ActionText = "Join " .. info.Name
+		prompt.ObjectText = info.Title
 		prompt.KeyboardKeyCode = Enum.KeyCode.E
 		prompt.HoldDuration = 0
 		prompt.MaxActivationDistance = 12
@@ -223,23 +462,23 @@ local function buildHall()
 		table.insert(connections, prompt.Triggered:Connect(function(player)
 			HubService.Join(player, id)
 		end))
-		torch(Vector3.new(x - 8.5, y + 0.2, z + 3))
-		torch(Vector3.new(x + 8.5, y + 0.2, z + 3))
 		HubService.Lobbies[id].Sign = labels
 		HubService.Lobbies[id].Prompt = prompt
 	end
-	-- spawn dais near the front of the hall, facing the gates
+
+	-- Spawn dais near the front of the hall, facing the gates ---------------------------------
 	local spawn = Instance.new("SpawnLocation")
 	spawn.Name = "HallSpawn"
 	spawn.Anchored = true
 	spawn.Neutral = true
 	spawn.Duration = 0
-	spawn.Size = Vector3.new(12, 1, 8)
-	spawn.CFrame = CFrame.new(0, y + 0.5, depth / 2 - 10) -- default facing -Z (toward the gates)
+	spawn.Size = Vector3.new(14, 1, 9)
+	spawn.CFrame = CFrame.new(0, y + 0.5, depth / 2 - 11)
 	spawn.Color = Color3.fromRGB(150, 120, 60)
-	spawn.Material = Enum.Material.Limestone
+	spawn.Material = Enum.Material.Marble
 	spawn.TopSurface = Enum.SurfaceType.Smooth
 	spawn.Parent = hallFolder
+	part({ Name = "SpawnTrim", Size = Vector3.new(15, 0.9, 10), Position = Vector3.new(0, y + 0.45, depth / 2 - 11), Color = GOLD, Material = Enum.Material.Metal })
 end
 
 -- Lobby state -------------------------------------------------------------------------
@@ -271,14 +510,18 @@ local function snapshot()
 		end
 		table.insert(lobbies, {
 			Id = lobby.Id, Name = lobby.Name, Title = lobby.Title, Mode = lobby.Mode, ModeLabel = modeLabel(lobby.Mode),
-			State = lobby.State, Members = members, Max = maxMembers(), Color = lobby.Color,
+			State = lobby.State, Members = members, Max = maxMembers(), Color = lobby.Color, Blurb = lobby.Blurb,
+			Modes = (function()
+				local list = {}
+				for _, mode in ipairs(lobby.Modes) do
+					table.insert(list, { Key = mode, Label = modeLabel(mode) })
+				end
+				return list
+			end)(),
 		})
 	end
-	local modes = {}
-	for _, mode in ipairs(MODES) do
-		table.insert(modes, { Key = mode, Label = modeLabel(mode) })
-	end
-	return { Lobbies = lobbies, Modes = modes, Studio = RunService:IsStudio() }
+	-- Modes (top level) = the first lobby's modes, kept for older clients
+	return { Lobbies = lobbies, Modes = lobbies[1] and lobbies[1].Modes or {}, Studio = RunService:IsStudio() }
 end
 
 local function refreshSigns()
@@ -324,7 +567,7 @@ function HubService.Leave(player, silent)
 	end
 	if #lobby.Members == 0 then
 		lobby.State = "Open"
-		lobby.Mode = DEFAULT_MODE
+		lobby.Mode = lobby.Default or DEFAULT_MODE
 	end
 	if not silent then
 		notice(player, "You left " .. lobby.Name, "Info")
@@ -368,8 +611,8 @@ function HubService.SetMode(player, mode)
 	if not lobby or lobby.Host ~= player or lobby.State ~= "Open" then
 		return false
 	end
-	if not table.find(MODES, mode) then
-		return false
+	if not table.find(lobby.Modes, mode) then
+		return false -- each gate only offers its own game mode(s)
 	end
 	lobby.Mode = mode
 	HubService.Broadcast()
@@ -501,7 +744,11 @@ function HubService.Init(options)
 	active = true
 	onLocalStart = options and options.OnLocalStart
 	for id = 1, LOBBY_COUNT do
-		HubService.Lobbies[id] = { Id = id, Name = LOBBY_NAMES[id], Title = LOBBY_TITLES[id], Color = LOBBY_COLORS[id], Mode = DEFAULT_MODE, Members = {}, Host = nil, State = "Open" }
+		local info = LOBBIES[id]
+		HubService.Lobbies[id] = {
+			Id = id, Name = info.Name, Title = info.Title, Color = info.Color, Blurb = info.Blurb,
+			Modes = info.Modes, Default = info.Default, Mode = info.Default, Members = {}, Host = nil, State = "Open",
+		}
 	end
 	buildHall()
 	local map = workspace:FindFirstChild("RuinfallMap")

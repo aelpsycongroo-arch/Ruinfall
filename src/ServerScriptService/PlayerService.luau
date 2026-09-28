@@ -127,6 +127,8 @@ function PlayerService.SetPlayerAttributes(participant)
 	player:SetAttribute("State", participant.State)
 	player:SetAttribute("RespawnAt", participant.RespawnAt or 0)
 	player:SetAttribute("Gold", participant.Stats.Gold or 0)
+	player:SetAttribute("Potions", participant.Potions or 0)
+	player:SetAttribute("Skill", participant.Skill or "")
 end
 
 -- Lobby -------------------------------------------------------------------
@@ -137,7 +139,27 @@ local SLOT_SPREAD = {
 	[6] = { { 1 }, { 1, 4 }, { 1, 3, 5 }, { 1, 2, 4, 5 }, { 1, 2, 3, 4, 5 }, { 1, 2, 3, 4, 5, 6 } },
 }
 
+-- Royale: free for all - every participant is its own team (1..18), everyone a Wanderer
+local function assignRoyaleTeams()
+	local activeTeams = {}
+	for index, participant in ipairs(PlayerService.GetParticipants()) do
+		participant.Team = index
+		participant.ManualTeam = false
+		participant.ClassKey = "Wanderer"
+		table.insert(activeTeams, index)
+		PlayerService.SetPlayerAttributes(participant)
+	end
+	return activeTeams, Constants.TeamModeSlots.Royale
+end
+
+function PlayerService.IsRoyale()
+	return Constants.IsRoyale(PlayerService.Mode)
+end
+
 function PlayerService.AssignTeams()
+	if Constants.IsRoyale(PlayerService.Mode) then
+		return assignRoyaleTeams()
+	end
 	local slots = Constants.TeamModeSlots[PlayerService.Mode] or 2
 	local ordered = PlayerService.GetParticipants()
 	local teamCount = math.clamp(#ordered, 1, slots)
@@ -172,7 +194,7 @@ end
 
 function PlayerService.SetTeam(player, team)
 	local participant = PlayerService.GetParticipantByPlayer(player)
-	if not participant then
+	if not participant or Constants.IsRoyale(PlayerService.Mode) then
 		return false
 	end
 	local maxTeams = Constants.TeamModeSlots[PlayerService.Mode] or 2
@@ -227,7 +249,7 @@ end
 
 function PlayerService.CycleBotClass(participantId)
 	local participant = PlayerService.GetParticipantById(participantId)
-	if not participant or not participant.IsBot then
+	if not participant or not participant.IsBot or Constants.IsRoyale(PlayerService.Mode) then
 		return false
 	end
 	local order = ClassDefinitions.Order
@@ -237,9 +259,25 @@ function PlayerService.CycleBotClass(participantId)
 	return true
 end
 
+-- LockedMode: a server reached through a hall gate keeps that gate's game mode
+-- (a Royale server never turns into a team match and vice versa).
+PlayerService.LockedMode = nil
+
 function PlayerService.SetMode(mode)
 	if not Constants.TeamModeSlots[mode] then
 		return false
+	end
+	local locked = PlayerService.LockedMode
+	if locked and Constants.IsRoyale(locked) ~= Constants.IsRoyale(mode) then
+		return false
+	end
+	-- leaving Royale: Wanderers become Fighters again (the default class)
+	if Constants.IsRoyale(PlayerService.Mode) and not Constants.IsRoyale(mode) then
+		for _, participant in ipairs(PlayerService.Participants) do
+			if participant.ClassKey == "Wanderer" then
+				participant.ClassKey = participant.IsBot and ClassDefinitions.Order[math.random(1, #ClassDefinitions.Order)] or "Fighter"
+			end
+		end
 	end
 	PlayerService.Mode = mode
 	-- Clear manual team choices since the available teams changed
@@ -265,7 +303,7 @@ end
 
 function PlayerService.SetClass(player, classKey)
 	local participant = PlayerService.GetParticipantByPlayer(player)
-	if not participant or not ClassDefinitions.IsValid(classKey) then
+	if not participant or not ClassDefinitions.IsValid(classKey) or Constants.IsRoyale(PlayerService.Mode) or classKey == "Wanderer" then
 		return false
 	end
 	participant.ClassKey = classKey
@@ -343,7 +381,8 @@ function PlayerService.SpawnHero(participant, position, lookAt)
 		CharacterFactory.PrepareHumanoid(model, isAvatar)
 	end
 
-	CharacterFactory.ApplyClassLook(model, participant.ClassKey, teamColor, isAvatar)
+	local classDef = ClassDefinitions.Get(participant.ClassKey)
+	CharacterFactory.ApplyClassLook(model, classDef and classDef.LookClass or participant.ClassKey, teamColor, isAvatar)
 	local spawnPosition = position + Vector3.new(0, 3.4, 0)
 	local spawnCFrame = CFrame.lookAt(spawnPosition, Vector3.new(lookAt.X, spawnPosition.Y, lookAt.Z))
 	model:PivotTo(spawnCFrame)
@@ -419,6 +458,8 @@ function PlayerService.ResetForLobby()
 		participant.Passives = {} -- [1..3] = passive item ids (automatic effects, no hotkey)
 		participant.PassiveStacks = {} -- per-match stacking passives, e.g. SoulHarvest = +HP (PassiveService)
 		participant.ItemReadyAt = {} -- [itemId] = server time the item ability is ready
+		participant.Potions = 0 -- health potions carried (monster drops)
+		participant.Skill = nil -- Royale: looted Q skill (a class key)
 	end
 	-- Admit spectators (late joiners); humans take priority over bots
 	for _, participant in ipairs(table.clone(PlayerService.Participants)) do
@@ -543,6 +584,8 @@ function PlayerService.Serialize()
 			ItemReadyAt = participant.ItemReadyAt or {},
 			PassiveStacks = participant.PassiveStacks or {},
 			WarBandActive = participant.WarBandActive or 0,
+			Potions = participant.Potions or 0,
+			Skill = participant.Skill or "",
 		})
 	end
 	return list

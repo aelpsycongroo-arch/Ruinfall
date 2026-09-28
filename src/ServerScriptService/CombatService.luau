@@ -289,6 +289,9 @@ function CombatService.CreateHero(participant, model, classKey)
 	local classDef = ClassDefinitions.Get(classKey)
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	local shopBonuses = CombatService.ComputeShopBonuses(participant)
+	if participant.Skill and participant.Skill ~= "" then
+		classDef = ClassDefinitions.WithSkill(classKey, participant.Skill) -- Royale: looted Q skill
+	end
 	local entity = {
 		Kind = "Hero",
 		Team = participant.Team,
@@ -320,7 +323,8 @@ function CombatService.CreateHero(participant, model, classKey)
 	}
 	applyExtraStats(entity, shopBonuses, true)
 	CombatService.Register(entity)
-	model:SetAttribute("Class", classKey)
+	-- LookClass: Royale Wanderers borrow the Fighter's gear / animations on the client
+	model:SetAttribute("Class", ClassDefinitions.Get(classKey).LookClass or classKey)
 	model:SetAttribute("ParticipantId", participant.Id)
 	model:SetAttribute("DisplayName", participant.Name)
 	model:SetAttribute("IsBot", participant.IsBot == true)
@@ -344,7 +348,7 @@ function CombatService.GetAttackCooldown(entity)
 		cooldown = cooldown / (1 + (entity.FrenzyAttackSpeed or 0))
 	end
 	if entity.BloodRushUntil > Util.Now() then
-		cooldown /= entity.Class.Ability.AttackSpeedMultiplier or 1
+		cooldown /= entity.Class.Ability and entity.Class.Ability.AttackSpeedMultiplier or 1
 	end
 	return cooldown
 end
@@ -355,7 +359,7 @@ function CombatService.GetSpeedMultiplier(entity)
 		multiplier *= BUFFS.SpeedCore.SpeedMultiplier
 	end
 	if entity.Class and (entity.BloodRushUntil or 0) > Util.Now() then
-		multiplier *= entity.Class.Ability.MoveSpeedMultiplier or 1
+		multiplier *= entity.Class.Ability and entity.Class.Ability.MoveSpeedMultiplier or 1
 	end
 	-- timed haste / slow from boot skills (CombatService.Haste / CombatService.Slow)
 	local now = Util.Now()
@@ -386,7 +390,7 @@ function CombatService.GetLifesteal(entity)
 		total += BUFFS.BloodCore.Lifesteal
 	end
 	if entity.Class and (entity.BloodRushUntil or 0) > Util.Now() then
-		total += entity.Class.Ability.Lifesteal or 0
+		total += entity.Class.Ability and entity.Class.Ability.Lifesteal or 0
 	end
 	return total
 end
@@ -397,7 +401,9 @@ function CombatService.PushHeroAttributes(entity)
 		return
 	end
 	model:SetAttribute("AttackCooldown", CombatService.GetAttackCooldown(entity))
-	model:SetAttribute("AbilityCooldown", CombatService.GetCooldown(entity, entity.Class.Ability.Cooldown))
+	-- Royale Wanderers have no Q until they loot a skill
+	model:SetAttribute("AbilityCooldown", entity.Class.Ability and CombatService.GetCooldown(entity, entity.Class.Ability.Cooldown) or 0)
+	model:SetAttribute("SkillKey", entity.Class.SkillKey or "")
 	model:SetAttribute("CooldownReduction", entity.CooldownReduction or 0)
 	model:SetAttribute("AbilityReadyAt", entity.AbilityReadyAt)
 	model:SetAttribute("EmpoweredAttack", entity.NextAttackMultiplier > 1)
@@ -1252,6 +1258,23 @@ function CombatService.IsInEnemySmoke(entity)
 		end
 	end
 	return false
+end
+
+-- Royale: give a hero the Q skill of another class (looted from a ruin). skillKey = class key.
+function CombatService.SetSkill(entity, skillKey)
+	if not entity or entity.Kind ~= "Hero" then
+		return false
+	end
+	local participant = entity.Participant
+	if participant then
+		participant.Skill = skillKey
+	end
+	entity.Class = ClassDefinitions.WithSkill(entity.ClassKey, skillKey)
+	entity.AbilityReadyAt = Util.Now() + 1
+	entity.BloodRushUntil = 0
+	CombatService.RecomputeSpeed(entity)
+	CombatService.PushHeroAttributes(entity)
+	return true
 end
 
 function CombatService.BeginMatch(mapData)

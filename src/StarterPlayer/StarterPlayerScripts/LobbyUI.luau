@@ -71,6 +71,9 @@ function LobbyUI.new(screen, clientState)
 	header(modePanel, "YOUR TEAM", 270)
 	self.TeamButtons = {}
 	for index, teamInfo in ipairs(Constants.Teams) do
+		if index > 6 then
+			break -- teams 7..18 are the free-for-all colours (no team picking there)
+		end
 		local teamNum = index
 		local button, stroke = Button({ Name = "Team" .. teamNum, Text = "", Position = UDim2.fromOffset(18 + (index - 1) * 44, 298), Size = UDim2.fromOffset(38, 38), Parent = modePanel }, function()
 			self.Remotes.LobbyRequest:FireServer("SetTeam", teamNum)
@@ -81,6 +84,12 @@ function LobbyUI.new(screen, clientState)
 		self.TeamButtons[teamNum] = { Button = button, Stroke = stroke, Color = teamInfo.Color }
 	end
 
+	-- Free for all servers (the Shattered Expanse gate) have one fixed mode
+	self.RoyaleModeInfo = Label({
+		Text = "FREE FOR ALL\n\n18 players - every hero for themselves.\nNo classes, no shop: break ruins to loot skills and gear.\nThe zone shrinks - last one standing wins.",
+		Font = FONTS.Medium, TextSize = 14, TextColor3 = COLORS.Text, TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top,
+		Position = UDim2.fromOffset(18, 48), Size = UDim2.new(1, -36, 0, 280), Visible = false, Parent = modePanel,
+	})
 	header(modePanel, "BOT DIFFICULTY", 348)
 	for index, difficulty in ipairs(Constants.BotDifficultyOrder) do
 		local button, stroke = Button({ Name = difficulty, Text = string.upper(difficulty), TextSize = 14, Position = UDim2.fromOffset(18 + (index - 1) * 89, 378), Size = UDim2.fromOffset(83, 40), Parent = modePanel }, function()
@@ -160,6 +169,12 @@ function LobbyUI.new(screen, clientState)
 		end
 		self.ClassCards[classKey] = { Button = card, Stroke = stroke, Color = classDef.Color }
 	end
+	self.ClassPanel = classPanel
+	self.RoyaleClassInfo = Label({
+		Text = "NO CLASSES\n\nEveryone lands as a Wanderer.\n\nBreak ruins to find class skills (Q) and items (E / R, boots, passives). Press F to take loot, DROP gear you don't want, and drink health potions from monsters with H.",
+		Font = FONTS.Medium, TextSize = 15, TextColor3 = COLORS.Text, TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top,
+		Position = UDim2.fromOffset(18, 50), Size = UDim2.new(1, -36, 0, 380), Visible = false, Parent = classPanel,
+	})
 	self.AbilityLabel = Label({ Text = "", Font = FONTS.Medium, TextSize = 13, TextColor3 = COLORS.Text, TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top, Position = UDim2.fromOffset(18, 450), Size = UDim2.new(1, -36, 0, 44), Parent = classPanel })
 
 	-- Match servers reached from the Ruinfall Hall can walk back to the hub
@@ -194,7 +209,7 @@ function LobbyUI:RefreshClassCards(selectedKey)
 		card.Stroke.Thickness = selected and 2.5 or 1.5
 	end
 	local classDef = ClassDefinitions.Get(selectedKey)
-	if classDef then
+	if classDef and classDef.Ability then -- (Royale Wanderers have no fixed ability)
 		self.AbilityLabel.Text = string.format("%s - %s (%ds cooldown)", classDef.Ability.Name, classDef.Ability.Description, classDef.Ability.Cooldown)
 	end
 end
@@ -207,6 +222,16 @@ function LobbyUI:Update(state)
 	local clientState = self.ClientState
 	local isHost = clientState.IsHost()
 	local me = clientState.GetMe()
+	local royale = Constants.IsRoyale(state.Mode)
+	for _, entry in pairs(self.ModeButtons) do
+		entry.Button.Visible = not royale
+	end
+	self.RoyaleModeInfo.Visible = royale
+	for _, card in pairs(self.ClassCards) do
+		card.Button.Visible = not royale
+	end
+	self.RoyaleClassInfo.Visible = royale
+	self.AbilityLabel.Visible = not royale
 
 	for mode, entry in pairs(self.ModeButtons) do
 		local selected = state.Mode == mode
@@ -224,7 +249,7 @@ function LobbyUI:Update(state)
 	local maxTeams = Constants.TeamModeSlots[state.Mode] or 2
 	local myTeam = me and me.Team or nil
 	for teamNum, entry in pairs(self.TeamButtons) do
-		local visible = teamNum <= maxTeams
+		local visible = teamNum <= maxTeams and not royale
 		entry.Button.Visible = visible
 		if visible then
 			local selected = myTeam == teamNum
@@ -291,7 +316,7 @@ function LobbyUI:Update(state)
 	local loading = state.State == STATE.PREPARING or state.State == STATE.GENERATING
 	self.Loading.Visible = loading
 	if loading then
-		self.LoadingLabel.Text = state.State == STATE.PREPARING and "PREPARING MATCH..." or "GENERATING ARENA..."
+		self.LoadingLabel.Text = state.State == STATE.PREPARING and "PREPARING MATCH..." or (royale and "GENERATING THE SHATTERED EXPANSE..." or "GENERATING CRATER ARENA...")
 		self.LoadingSub.Text = state.Seed and ("Seed " .. tostring(state.Seed)) or ""
 	end
 end

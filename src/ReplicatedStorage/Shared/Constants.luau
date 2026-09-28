@@ -17,6 +17,7 @@ Constants.MatchState = {
 	LOBBY = "Lobby",
 	PREPARING = "Preparing",
 	GENERATING = "Generating",
+	DEPLOYING = "Deploying", -- Royale only: players pick their landing spot on the map
 	STARTING = "Starting",
 	ACTIVE = "Active",
 	ENDING = "Ending",
@@ -24,10 +25,16 @@ Constants.MatchState = {
 }
 
 -- Team modes ----------------------------------------------------------------
-Constants.TeamModes = { TWO = "2Team", FOUR = "4Team", SIX = "6Team" }
+-- TeamModeOrder = the CraterArena team modes (lobby buttons). "Royale" is the separate
+-- 18-player free-for-all battle royale (its own hall gate, never shown as a team mode).
+Constants.TeamModes = { TWO = "2Team", FOUR = "4Team", SIX = "6Team", ROYALE = "Royale" }
 Constants.TeamModeOrder = { "2Team", "4Team", "6Team" }
-Constants.TeamModeSlots = { ["2Team"] = 2, ["4Team"] = 4, ["6Team"] = 6 }
-Constants.TeamModeLabels = { ["2Team"] = "2 TEAM", ["4Team"] = "4 TEAM", ["6Team"] = "6 TEAM" }
+Constants.TeamModeSlots = { ["2Team"] = 2, ["4Team"] = 4, ["6Team"] = 6, Royale = 18 }
+Constants.TeamModeLabels = { ["2Team"] = "2 TEAM", ["4Team"] = "4 TEAM", ["6Team"] = "6 TEAM", Royale = "FREE FOR ALL" }
+
+function Constants.IsRoyale(mode)
+	return mode == "Royale"
+end
 
 Constants.Teams = {
 	{ Name = "Crimson", Color = Color3.fromRGB(235, 70, 70) },
@@ -36,6 +43,19 @@ Constants.Teams = {
 	{ Name = "Gilded", Color = Color3.fromRGB(245, 200, 60) },
 	{ Name = "Violet", Color = Color3.fromRGB(175, 110, 255) },
 	{ Name = "Ember", Color = Color3.fromRGB(255, 140, 50) },
+	-- 7..18: Royale free-for-all (every hero is its own team)
+	{ Name = "Frost", Color = Color3.fromRGB(150, 230, 255) },
+	{ Name = "Rose", Color = Color3.fromRGB(255, 120, 190) },
+	{ Name = "Moss", Color = Color3.fromRGB(150, 190, 70) },
+	{ Name = "Copper", Color = Color3.fromRGB(200, 120, 80) },
+	{ Name = "Indigo", Color = Color3.fromRGB(100, 100, 230) },
+	{ Name = "Jade", Color = Color3.fromRGB(60, 190, 160) },
+	{ Name = "Ivory", Color = Color3.fromRGB(235, 225, 200) },
+	{ Name = "Scarlet", Color = Color3.fromRGB(200, 30, 60) },
+	{ Name = "Amber", Color = Color3.fromRGB(255, 175, 0) },
+	{ Name = "Lilac", Color = Color3.fromRGB(200, 160, 255) },
+	{ Name = "Teal", Color = Color3.fromRGB(0, 150, 170) },
+	{ Name = "Ash", Color = Color3.fromRGB(140, 140, 150) },
 }
 Constants.NEUTRAL_TEAM = 0
 
@@ -115,6 +135,42 @@ Constants.Vision = {
 	RADIUS = 58,
 	BRUSH_REVEAL_RANGE = 9,
 	UPDATE_INTERVAL = 0.2,
+}
+
+-- Royale (18-player free-for-all battle royale) ------------------------------------------
+-- No classes, no shop, no respawn: everyone lands as a Wanderer, loots skills and items
+-- from ruins, and the play zone shrinks until one hero is left.
+Constants.Royale = {
+	MAP_RADIUS = 420,
+	DEPLOY_TIME = 25, -- seconds to pick a landing spot on the map
+	SPAWN_EXCLUSION = 60, -- a picked spot blocks this radius for everyone else
+	SPAWN_EDGE_MARGIN = 30, -- keep landing spots this far inside the map edge
+	START_RUINS = 34, -- loot ruins placed at match start
+	RUIN_HEALTH = 450,
+	RUIN_RESPAWN_INTERVAL = 50, -- a fresh ruin appears inside the zone this often
+	LOOT_PER_RUIN = 2,
+	SKILL_CHANCE = 0.3, -- chance a loot drop is a class skill instead of an item
+	ZONE_START_DELAY = 70, -- seconds before the first shrink starts
+	-- each phase: wait, then shrink over Shrink seconds to Radius (fraction of the map radius)
+	ZONE_PHASES = {
+		{ Wait = 0, Shrink = 50, Radius = 0.62, DamagePercent = 0.02 },
+		{ Wait = 45, Shrink = 40, Radius = 0.38, DamagePercent = 0.03 },
+		{ Wait = 40, Shrink = 35, Radius = 0.2, DamagePercent = 0.05 },
+		{ Wait = 35, Shrink = 30, Radius = 0.08, DamagePercent = 0.08 },
+		{ Wait = 30, Shrink = 30, Radius = 0.0, DamagePercent = 0.12 },
+	},
+	ZONE_TICK = 0.5,
+}
+
+-- Loot: health potions (monsters, both modes) + dropped / looted items (Royale) ------------
+Constants.Loot = {
+	PICKUP_RADIUS = 6,
+	POTION_HEAL_PERCENT = 0.35, -- of max health, restored over POTION_HEAL_TIME
+	POTION_HEAL_TIME = 3,
+	POTION_COOLDOWN = 8,
+	MAX_POTIONS = 5,
+	POTION_DROP_CHANCE = 0.45, -- per natural monster killed
+	LOOT_LIFETIME = 180, -- seconds before loot on the ground fades
 }
 
 -- Map --------------------------------------------------------------------------------

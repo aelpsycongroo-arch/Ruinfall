@@ -28,3 +28,30 @@ The old copies in `ServerStorage/ScriptBackups` and `ServerStorage/RuinfallOldDr
 This repo is set up for [Rojo](https://rojo.space). Run `rojo serve`, then click **Connect** in the
 Rojo Studio plugin. Rojo only manages the scripts in `src/`; parts, models, UI and other objects in
 the place are left alone.
+
+## Game modes
+
+The Ruinfall Hall has one gate per game mode:
+
+| Gate | Mode | What it is |
+|------|------|-----------|
+| **Crater Arena** | 2 / 4 / 6 Team | The classic team battle: classes, shop, flags, minion waves. The arena sits in an impact crater (cosmetic rim and scorch marks; the layout is unchanged). |
+| **Shattered Expanse** | Free For All (`Royale`) | 18 players, each on their own. Pick a landing spot on the map (a pick blocks the area around it for others), no classes or shop. Break ruins for skills (Q) and items, drop gear you don't want, and stay inside the shrinking zone. Last one standing wins. |
+
+Natural monsters drop **health potions** in both modes (walk over to collect, press **H** to drink).
+
+Main code: `ServerScriptService/RoyaleService` (deploy, zone, loot ruins), `ServerScriptService/LootService`
+(potions, loot pickups, dropping gear), `MatchManager.RunRoyaleMatch`, `MapGenerator.GenerateRoyale`,
+and `StarterPlayerScripts/RoyaleUI` (landing map, zone HUD, gear/potion panel). Settings live in
+`Constants.Royale` and `Constants.Loot`.
+
+## Updating the place file from `src/`
+
+After editing scripts in `src/`, write them into the place file:
+
+```
+python3 tools/rbxl_build.py rainfall.rbxl src rainfall.rbxl
+```
+
+Existing scripts get their new source; new `.luau` files become new scripts (their parent must already exist).
+Needs `pip install lz4 zstandard`.

@@ -93,7 +93,7 @@ end
 
 local function buildBoundary(mapData, folders)
 	local radius = mapData.Radius
-	local segments = GEN.BOUNDARY_SEGMENTS
+	local segments = mapData.BoundarySegments or GEN.BOUNDARY_SEGMENTS
 	local height = GEN.BOUNDARY_HEIGHT
 	local segmentLength = 2 * math.pi * (radius + 2) / segments + 1.5
 	for index = 1, segments do
@@ -102,7 +102,9 @@ local function buildBoundary(mapData, folders)
 		local cframe = CFrame.lookAt(Vector3.new(position.X, height / 2, position.Z), Vector3.new(0, height / 2, 0))
 		local wall = PropBuilder.Collider(folders.Blockers, "Boundary", Vector3.new(segmentLength, height, 4), cframe)
 		wall:SetAttribute("Boundary", true)
-		PropBuilder.Cliff(folders.Decor, Util.RotateY(Vector3.new(0, 0, radius + 6), angle), mapData.DecorRandom)
+		if not mapData.Crater then -- the crater rim replaces the loose cliff boulders
+			PropBuilder.Cliff(folders.Decor, Util.RotateY(Vector3.new(0, 0, radius + 6), angle), mapData.DecorRandom)
+		end
 		if index % 4 == 0 then
 			makeDecor({
 				Name = "BoundaryCrystal",
@@ -232,29 +234,33 @@ local function buildCenter(mapData, folders)
 	table.insert(mapData.Reserved, { Position = Vector3.zero, Radius = GEN.CENTER_RESERVED_RADIUS, Kind = "Center" })
 end
 
+local function placeCamp(mapData, folders, rng, index, position, angle)
+	local campFolder = Instance.new("Folder")
+	campFolder.Name = "Camp" .. index
+	campFolder.Parent = folders.Camps
+	local dirt = PropBuilder.GroundDecal(campFolder, "Ground_Dirt_A", position, 24, mapData.DecorRandom)
+	if not dirt then
+		flatDisc(position + Vector3.new(0, 0.05, 0), 22, 0.12, PALETTE.Camp, Enum.Material.Ground, campFolder)
+	end
+	for rockIndex = 1, 7 do
+		local rockAngle = (rockIndex / 7) * 2 * math.pi + rng:NextNumber(-0.2, 0.2)
+		local rockPosition = position + Util.RotateY(Vector3.new(0, 0, 10.5), rockAngle)
+		local size = rng:NextNumber(1.4, 2.4)
+		if not PropBuilder.Asset(rockIndex % 3 == 0 and "Rock_Flat" or "Rock_Small", campFolder, CFrame.new(rockPosition) * CFrame.Angles(0, rng:NextNumber(0, 6.28), 0), size * 0.7) then
+			PropBuilder.Piece(campFolder, "Stone", Vector3.new(size, size, size), CFrame.new(rockPosition + Vector3.new(0, size * 0.3, 0)), Color3.fromRGB(190, 180, 170), Enum.PartType.Ball)
+		end
+	end
+	table.insert(mapData.Camps, { Id = "Camp" .. index, Position = position, Angle = angle, Folder = campFolder })
+	table.insert(mapData.Reserved, { Position = position, Radius = GEN.CAMP_RESERVED_RADIUS, Kind = "Camp" })
+end
+
 local function buildCamps(mapData, folders, rng)
 	local campCount = math.max(mapData.SlotCount, GEN.MIN_CAMPS)
 	local campRadius = mapData.Radius * GEN.CAMP_RING_FACTOR
 	for index = 1, campCount do
 		local angle = (index - 0.5) * 2 * math.pi / campCount
 		local position = Util.RotateY(Vector3.new(0, 0, campRadius), angle)
-		local campFolder = Instance.new("Folder")
-		campFolder.Name = "Camp" .. index
-		campFolder.Parent = folders.Camps
-		local dirt = PropBuilder.GroundDecal(campFolder, "Ground_Dirt_A", position, 24, mapData.DecorRandom)
-		if not dirt then
-			flatDisc(position + Vector3.new(0, 0.05, 0), 22, 0.12, PALETTE.Camp, Enum.Material.Ground, campFolder)
-		end
-		for rockIndex = 1, 7 do
-			local rockAngle = (rockIndex / 7) * 2 * math.pi + rng:NextNumber(-0.2, 0.2)
-			local rockPosition = position + Util.RotateY(Vector3.new(0, 0, 10.5), rockAngle)
-			local size = rng:NextNumber(1.4, 2.4)
-			if not PropBuilder.Asset(rockIndex % 3 == 0 and "Rock_Flat" or "Rock_Small", campFolder, CFrame.new(rockPosition) * CFrame.Angles(0, rng:NextNumber(0, 6.28), 0), size * 0.7) then
-				PropBuilder.Piece(campFolder, "Stone", Vector3.new(size, size, size), CFrame.new(rockPosition + Vector3.new(0, size * 0.3, 0)), Color3.fromRGB(190, 180, 170), Enum.PartType.Ball)
-			end
-		end
-		table.insert(mapData.Camps, { Id = "Camp" .. index, Position = position, Angle = angle, Folder = campFolder })
-		table.insert(mapData.Reserved, { Position = position, Radius = GEN.CAMP_RESERVED_RADIUS, Kind = "Camp" })
+		placeCamp(mapData, folders, rng, index, position, angle)
 	end
 end
 
@@ -552,6 +558,150 @@ local function buildDecor(mapData, folders, rng)
 	end
 end
 
+-- CraterArena: the arena sits in the floor of an ancient impact crater ------------------
+-- Purely cosmetic and entirely OUTSIDE the play area / on the floor as flat paint:
+-- the layout (walls, rocks, brush, camps, ruin spots) is untouched. Uses its own Random
+-- so the seeded layout and prop variation stay exactly the same as before.
+local CRATER = {
+	RimStart = 4, -- rim slope starts this far outside the arena edge
+	RimDepth = 64,
+	RimHeight = 40,
+	Segments = 72,
+	Plateau = 150, -- flat crater lip beyond the slope
+	Rock = Color3.fromRGB(92, 78, 66),
+	RockDark = Color3.fromRGB(58, 48, 42),
+	Scorch = Color3.fromRGB(46, 36, 30),
+	Ember = Color3.fromRGB(255, 120, 40),
+}
+
+local function buildCrater(mapData, folders)
+	local radius = mapData.Radius
+	local rng = Random.new(mapData.Seed + 313)
+	local folder = Instance.new("Folder")
+	folder.Name = "Crater"
+	folder.Parent = folders.Decor
+	-- the sloped rim: wedges whose low edge faces the arena (inner slope of the crater)
+	local segments = CRATER.Segments
+	local midRadius = radius + CRATER.RimStart + CRATER.RimDepth / 2
+	local width = 2 * math.pi * (radius + CRATER.RimStart + CRATER.RimDepth) / segments + 2
+	for index = 1, segments do
+		local angle = (index - 0.5) * 2 * math.pi / segments
+		local height = CRATER.RimHeight * rng:NextNumber(0.85, 1.12)
+		local center = Util.RotateY(Vector3.new(0, 0, midRadius), angle)
+		local wedge = Instance.new("WedgePart")
+		wedge.Name = "CraterRim"
+		wedge.Anchored = true
+		wedge.CanCollide = false
+		wedge.CanQuery = false
+		wedge.CanTouch = false
+		wedge.Size = Vector3.new(width, height, CRATER.RimDepth)
+		-- front (-Z, the low edge) points at the arena centre; the tall back faces outward
+		wedge.CFrame = CFrame.lookAt(Vector3.new(center.X, height / 2 - 0.6, center.Z), Vector3.new(0, height / 2 - 0.6, 0))
+		wedge.Color = CRATER.Rock:Lerp(CRATER.RockDark, rng:NextNumber(0, 0.6))
+		wedge.Material = Enum.Material.Basalt
+		wedge.Parent = folder
+		-- crater lip beyond the slope
+		local lip = makeDecor({
+			Name = "CraterLip",
+			Size = Vector3.new(width * (radius + CRATER.RimStart + CRATER.RimDepth + CRATER.Plateau / 2) / (radius + CRATER.RimStart + CRATER.RimDepth), 4, CRATER.Plateau),
+			CFrame = CFrame.lookAt(Vector3.new(0, 0, 0), Util.RotateY(Vector3.new(0, 0, 1), angle)) * CFrame.new(0, height - 2.6, -(radius + CRATER.RimStart + CRATER.RimDepth + CRATER.Plateau / 2 - 1)),
+			Color = CRATER.RockDark:Lerp(CRATER.Rock, rng:NextNumber(0, 0.5)),
+			Material = Enum.Material.Rock,
+			Parent = folder,
+		})
+		lip.CastShadow = true
+		-- jagged spires along the lip
+		if index % 3 == 0 then
+			local spireHeight = rng:NextNumber(10, 22)
+			local base = Util.RotateY(Vector3.new(0, 0, radius + CRATER.RimStart + CRATER.RimDepth + rng:NextNumber(2, 16)), angle + rng:NextNumber(-0.03, 0.03))
+			makeDecor({
+				Name = "RimSpire",
+				Size = Vector3.new(rng:NextNumber(5, 9), spireHeight, rng:NextNumber(5, 9)),
+				CFrame = CFrame.new(base + Vector3.new(0, height + spireHeight / 2 - 3, 0)) * CFrame.Angles(rng:NextNumber(-0.25, 0.25), rng:NextNumber(0, 6.28), rng:NextNumber(-0.25, 0.25)),
+				Color = CRATER.RockDark,
+				Material = Enum.Material.Slate,
+				Parent = folder,
+			})
+		end
+		-- glowing ember veins running down the rim slope
+		if index % 4 == 1 then
+			local top = Util.RotateY(Vector3.new(0, 0, radius + CRATER.RimStart + CRATER.RimDepth - 4), angle)
+			local bottom = Util.RotateY(Vector3.new(0, 0, radius + CRATER.RimStart + 6), angle + rng:NextNumber(-0.02, 0.02))
+			local topY, bottomY = height - 4, 1.2
+			local a = Vector3.new(top.X, topY, top.Z)
+			local b = Vector3.new(bottom.X, bottomY, bottom.Z)
+			makeDecor({
+				Name = "EmberVein",
+				Size = Vector3.new(0.6, 0.25, (b - a).Magnitude),
+				CFrame = CFrame.lookAt((a + b) / 2, b) * CFrame.new(0, 0.2, 0),
+				Color = CRATER.Ember,
+				Material = Enum.Material.Neon,
+				Transparency = 0.25,
+				CastShadow = false,
+				Parent = folder,
+			})
+		end
+		-- fallen boulders on the slope
+		if rng:NextNumber() < 0.55 then
+			local d = rng:NextNumber(10, CRATER.RimDepth - 12)
+			local spot = Util.RotateY(Vector3.new(0, 0, radius + CRATER.RimStart + d), angle + rng:NextNumber(-0.04, 0.04))
+			local y = height * (d / CRATER.RimDepth)
+			local size = rng:NextNumber(4, 9)
+			makeDecor({
+				Name = "RimBoulder",
+				Shape = Enum.PartType.Ball,
+				Size = Vector3.new(size, size, size),
+				Position = spot + Vector3.new(0, y + size * 0.1, 0),
+				Color = CRATER.RockDark:Lerp(CRATER.Rock, rng:NextNumber()),
+				Material = Enum.Material.Basalt,
+				Parent = folder,
+			})
+		end
+	end
+	-- the crater floor: scorched rings darkening toward the impact centre (thin paint layers)
+	for index, ring in ipairs({ { 1.0, 0.86 }, { 0.72, 0.82 }, { 0.44, 0.76 }, { 0.2, 0.7 } }) do
+		flatDisc(Vector3.new(0, 0.012 + index * 0.004, 0), radius * 2 * ring[1], 0.02, CRATER.Scorch, Enum.Material.Ground, folder, ring[2])
+	end
+	-- a shock-ring near the rim foot
+	flatDisc(Vector3.new(0, 0.03, 0), (radius + 3) * 2, 0.02, CRATER.RockDark, Enum.Material.Rock, folder, 0.35)
+	-- glowing impact cracks radiating from the centre (flat, under everything)
+	for index = 1, 14 do
+		local angle = (index / 14) * 2 * math.pi + rng:NextNumber(-0.12, 0.12)
+		local r0 = GEN.CENTER_RESERVED_RADIUS + rng:NextNumber(0, 6)
+		local length = rng:NextNumber(radius * 0.18, radius * 0.42)
+		local points = { Util.RotateY(Vector3.new(0, 0, r0), angle) }
+		for step = 1, 4 do
+			points[step + 1] = Util.RotateY(Vector3.new(0, 0, r0 + length * step / 4), angle + rng:NextNumber(-0.09, 0.09))
+		end
+		for step = 1, 4 do
+			local a, b = points[step], points[step + 1]
+			local mid = (a + b) / 2
+			makeDecor({
+				Name = "ImpactCrack",
+				Size = Vector3.new(0.45 * (1 - step * 0.18) + 0.1, 0.04, (b - a).Magnitude + 0.4),
+				CFrame = CFrame.lookAt(Vector3.new(mid.X, 0.06, mid.Z), Vector3.new(b.X, 0.06, b.Z)),
+				Color = CRATER.Ember,
+				Material = Enum.Material.Neon,
+				Transparency = 0.35 + step * 0.12,
+				CastShadow = false,
+				Parent = folder,
+			})
+		end
+	end
+	-- smouldering vents on the rim slope (particles, outside the play area)
+	for index = 1, 10 do
+		local angle = (index / 10) * 2 * math.pi + rng:NextNumber(-0.2, 0.2)
+		local spot = Util.RotateY(Vector3.new(0, 0, radius + CRATER.RimStart + 16), angle)
+		local vent = makeDecor({ Name = "SmokeVent", Size = Vector3.new(2, 0.5, 2), Position = spot + Vector3.new(0, CRATER.RimHeight * 16 / CRATER.RimDepth, 0), Transparency = 1, Parent = folder })
+		local smoke = Instance.new("Smoke")
+		smoke.Color = Color3.fromRGB(70, 60, 55)
+		smoke.Opacity = 0.18
+		smoke.RiseVelocity = 3
+		smoke.Size = 6
+		smoke.Parent = vent
+	end
+end
+
 -- Public API ---------------------------------------------------------------------------
 function MapGenerator.Clear()
 	local existing = workspace:FindFirstChild("RuinfallMap")
@@ -595,6 +745,8 @@ function MapGenerator.Generate(seed, slotCount, activeTeams)
 		Lanes = {},
 		Reserved = {},
 		DecorRandom = Random.new(seed + 99), -- cosmetic only, never affects layout
+		MapName = "CraterArena",
+		Crater = true,
 	}
 
 	buildGround(mapData, folders)
@@ -607,12 +759,104 @@ function MapGenerator.Generate(seed, slotCount, activeTeams)
 	buildRocks(mapData, folders, rng)
 	buildBrush(mapData, folders, rng)
 	buildDecor(mapData, folders, rng)
+	buildCrater(mapData, folders)
 
 	root.Parent = workspace
+	workspace:SetAttribute("MapName", mapData.MapName)
 	workspace:SetAttribute("ArenaRadius", mapData.Radius)
 	workspace:SetAttribute("MatchSeed", seed)
 	MapGenerator.Current = mapData
 	return mapData
+end
+
+-- Royale: "The Shattered Expanse" - one huge free-for-all map with no bases or lanes.
+-- Walls, rocks, brush and monster camps are scattered over the whole disc (no rotational
+-- symmetry: landing spots are chosen by the players themselves).
+function MapGenerator.GenerateRoyale(seed)
+	MapGenerator.Clear()
+	local rng = Random.new(seed)
+	local root = Instance.new("Folder")
+	root.Name = "RuinfallMap"
+	local folders = {}
+	for _, name in ipairs({ "Ground", "Blockers", "Brush", "Bases", "Camps", "Decor", "Markers" }) do
+		local folder = Instance.new("Folder")
+		folder.Name = name
+		folder.Parent = root
+		folders[name] = folder
+	end
+	local mapData = {
+		Seed = seed,
+		Radius = Constants.Royale.MAP_RADIUS,
+		SlotCount = 1,
+		SectorAngle = 2 * math.pi,
+		Folder = root,
+		Folders = folders,
+		Blockers = folders.Blockers,
+		Bases = {},
+		Camps = {},
+		BrushZones = {},
+		Walls = {},
+		Rocks = {},
+		Lanes = {},
+		Reserved = {},
+		DecorRandom = Random.new(seed + 99),
+		BoundarySegments = 110,
+		MapName = "ShatteredExpanse",
+		Royale = true,
+	}
+	buildGround(mapData, folders)
+	buildBoundary(mapData, folders)
+	buildCenter(mapData, folders)
+	-- monster camps spread over the whole map
+	local campIndex, attempts = 0, 0
+	while campIndex < 16 and attempts < 600 do
+		attempts += 1
+		local position = Util.RotateY(Vector3.new(0, 0, rng:NextNumber(60, mapData.Radius - 40)), rng:NextNumber(0, math.pi * 2))
+		local ok = true
+		for _, camp in ipairs(mapData.Camps) do
+			if Util.FlatDistance(camp.Position, position) < 110 then
+				ok = false
+				break
+			end
+		end
+		if ok and circleIsClear(mapData, position, GEN.CAMP_RESERVED_RADIUS, 4) then
+			campIndex += 1
+			placeCamp(mapData, folders, rng, campIndex, position, math.atan2(position.X, position.Z))
+		end
+	end
+	for _ = 1, 5 do
+		buildWalls(mapData, folders, rng)
+	end
+	for _ = 1, 5 do
+		buildRocks(mapData, folders, rng)
+	end
+	for _ = 1, 6 do
+		buildBrush(mapData, folders, rng)
+	end
+	buildDecor(mapData, folders, rng)
+	-- ruined watchtowers as landmarks (decor only, sit on rocks-free ground)
+	local drng = mapData.DecorRandom
+	for _ = 1, 18 do
+		local position = Util.RotateY(Vector3.new(0, 0, drng:NextNumber(40, mapData.Radius - 30)), drng:NextNumber(0, math.pi * 2))
+		if circleIsClear(mapData, position, 4, 2) then
+			PropBuilder.Column(folders.Decor, position, drng:NextNumber(9, 16), { Broken = drng:NextNumber() < 0.7, Random = drng })
+		end
+	end
+	root.Parent = workspace
+	workspace:SetAttribute("MapName", mapData.MapName)
+	workspace:SetAttribute("ArenaRadius", mapData.Radius)
+	workspace:SetAttribute("MatchSeed", seed)
+	MapGenerator.Current = mapData
+	return mapData
+end
+
+-- Royale landing spots: inside the map, not inside walls / rocks / camps.
+function MapGenerator.IsSpawnClear(position)
+	local mapData = MapGenerator.Current
+	if not mapData then
+		return false
+	end
+	return circleIsClear(mapData, position, 3, 1)
 end
 
 function MapGenerator.GetBrushZoneIndex(position)
@@ -629,13 +873,19 @@ function MapGenerator.GetBrushZoneIndex(position)
 end
 
 -- Finds a valid ruin location: not in walls, bases, camps, brush or near other ruins.
-function MapGenerator.FindRuinLocation(rng, existingPositions)
+-- center / maxRadius (optional): search inside that circle instead (Royale play zone).
+function MapGenerator.FindRuinLocation(rng, existingPositions, center, maxRadius)
 	local mapData = MapGenerator.Current
 	if not mapData then
 		return nil
 	end
+	center = center and Vector3.new(center.X, 0, center.Z) or Vector3.zero
+	maxRadius = math.min(maxRadius or math.huge, mapData.Radius - 28)
 	for _ = 1, 100 do
-		local position = Util.RotateY(Vector3.new(0, 0, rng:NextNumber(0, mapData.Radius - 28)), rng:NextNumber(0, math.pi * 2))
+		local position = center + Util.RotateY(Vector3.new(0, 0, rng:NextNumber(0, math.max(1, maxRadius))), rng:NextNumber(0, math.pi * 2))
+		if Util.Flat(position).Magnitude > mapData.Radius - 28 then
+			position = Util.Flat(position).Unit * (mapData.Radius - 28)
+		end
 		local valid = true
 		for _, base in ipairs(mapData.Bases) do
 			if Util.FlatDistance(position, base.Position) < GEN.RUIN_MIN_BASE_DISTANCE then

@@ -251,15 +251,17 @@ local function countRuins()
 	return count
 end
 
-function RuinService.SpawnRuin()
+-- options (optional, Royale): { Center, Radius } search area, Health override
+function RuinService.SpawnRuin(options)
 	if not folder then
 		return nil
 	end
+	options = options or {}
 	local existing = {}
 	for _, ruin in pairs(RuinService.Ruins) do
 		table.insert(existing, ruin.Position)
 	end
-	local position = MapGenerator.FindRuinLocation(random, existing)
+	local position = MapGenerator.FindRuinLocation(random, existing, options.Center, options.Radius)
 	if not position then
 		return nil
 	end
@@ -270,8 +272,8 @@ function RuinService.SpawnRuin()
 		Model = model,
 		Root = obelisk,
 		Position = position,
-		Health = RUIN.HEALTH,
-		MaxHealth = RUIN.HEALTH,
+		Health = options.Health or RUIN.HEALTH,
+		MaxHealth = options.Health or RUIN.HEALTH,
 		Armor = 0,
 		Radius = 3.2,
 	})

@@ -37,6 +37,8 @@ local PassiveService = require(ServerScriptService:WaitForChild("PassiveService"
 local CreepService = require(ServerScriptService:WaitForChild("CreepService"))
 local MatchManager = require(ServerScriptService:WaitForChild("MatchManager"))
 local HubService = require(ServerScriptService:WaitForChild("HubService"))
+local LootService = require(ServerScriptService:WaitForChild("LootService"))
+local RoyaleService = require(ServerScriptService:WaitForChild("RoyaleService"))
 
 -- Constants
 local STATE = Constants.MatchState
@@ -142,6 +144,7 @@ local function applyTeleportData(player)
 	if type(data) == "table" and type(data.Mode) == "string" and Constants.TeamModeSlots[data.Mode] then
 		teleportModeApplied = true
 		PlayerService.SetMode(data.Mode)
+		PlayerService.LockedMode = data.Mode -- this server keeps its gate's game mode
 	end
 end
 
@@ -184,6 +187,7 @@ if serverRole == "Hub" then
 			initMatchRole()
 			if lobby and lobby.Mode then
 				PlayerService.SetMode(lobby.Mode)
+				PlayerService.LockedMode = lobby.Mode
 			end
 			task.delay(1.5, MatchManager.Broadcast) -- clients finish switching UI first
 		end,
@@ -298,6 +302,46 @@ Net.Get("AbilityRequest").OnServerEvent:Connect(function(player, slot, aimPositi
 		if not ok and reason and reason ~= "Cooldown" then
 			Net.Notify(player, reason, "Warning")
 		end
+	end
+end)
+
+-- Health potions (both modes) and dropping unwanted gear (Royale)
+Net.Get("LootRequest").OnServerEvent:Connect(function(player, action, value)
+	if not allowRequest(player) or type(action) ~= "string" or MatchManager.State ~= STATE.ACTIVE then
+		return
+	end
+	local participant = PlayerService.GetParticipantByPlayer(player)
+	if not participant then
+		return
+	end
+	local ok, reason
+	if action == "UsePotion" then
+		ok, reason = LootService.UsePotion(participant)
+	elseif action == "Drop" and (value == "Skill" or type(value) == "number") then
+		ok, reason = LootService.Drop(participant, value)
+	end
+	if not ok and reason then
+		Net.Notify(player, reason, "Warning")
+	end
+end)
+
+-- Royale deploy: pick a landing spot on the map
+Net.Get("RoyaleRequest").OnServerEvent:Connect(function(player, action, value)
+	if not allowRequest(player) or action ~= "Pick" or MatchManager.State ~= STATE.DEPLOYING then
+		return
+	end
+	if typeof(value) ~= "Vector3" or not Util.IsFiniteVector(value) then
+		return
+	end
+	local participant = PlayerService.GetParticipantByPlayer(player)
+	if not participant or participant.Spectator then
+		return
+	end
+	local ok, reason = RoyaleService.Pick(participant, value)
+	if ok then
+		MatchManager.Broadcast()
+	elseif reason then
+		Net.Notify(player, reason, "Warning")
 	end
 end)
 

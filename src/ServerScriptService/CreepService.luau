@@ -480,7 +480,9 @@ function CreepService.Init()
 				CreepService.Cleanup() -- match over: remove any remaining minions
 			elseif CombatService.Active then
 				local now = Util.Now()
-				if CreepService.NextWaveAt and now >= CreepService.NextWaveAt then
+				-- Royale has no bases: no minion waves (Golem Heart golems below still work)
+				local royale = MatchManager.IsRoyale and MatchManager.IsRoyale()
+				if CreepService.NextWaveAt and now >= CreepService.NextWaveAt and not royale then
 					CreepService.NextWaveAt = now + WAVES.Interval
 					local ok, err = pcall(CreepService.SpawnAllWaves)
 					if not ok then

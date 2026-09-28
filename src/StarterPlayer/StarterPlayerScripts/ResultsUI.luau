@@ -92,11 +92,12 @@ function ResultsUI:Update(state)
 	elseif state.Winner == myTeam then
 		self.Title.Text = "VICTORY"
 		self.Title.TextColor3 = COLORS.Gold
-		self.Subtitle.Text = string.upper(Constants.GetTeamName(state.Winner)) .. " WINS"
+		self.Subtitle.Text = string.upper(state.WinnerName or Constants.GetTeamName(state.Winner)) .. " WINS"
 	else
 		self.Title.Text = "ELIMINATED"
 		self.Title.TextColor3 = COLORS.Danger
-		self.Subtitle.Text = string.upper(Constants.GetTeamName(state.Winner)) .. " WINS"
+		-- free for all: the winner is a player, not a team
+		self.Subtitle.Text = string.upper(state.WinnerName or Constants.GetTeamName(state.Winner)) .. " WINS"
 	end
 
 	local list = {}
@@ -105,7 +106,21 @@ function ResultsUI:Update(state)
 			table.insert(list, participant)
 		end
 	end
+	-- free for all: rank by placement (winner #1, then reverse elimination order)
+	local placement = nil
+	if state.Royale and state.EliminationOrder then
+		placement = {}
+		for index, team in ipairs(state.EliminationOrder) do
+			placement[team] = #list - index + 1
+		end
+		if state.Winner then
+			placement[state.Winner] = 1
+		end
+	end
 	table.sort(list, function(a, b)
+		if placement and (placement[a.Team] or 1) ~= (placement[b.Team] or 1) then
+			return (placement[a.Team] or 1) < (placement[b.Team] or 1)
+		end
 		if (a.Team == state.Winner) ~= (b.Team == state.Winner) then
 			return a.Team == state.Winner
 		end
@@ -129,7 +144,7 @@ function ResultsUI:Update(state)
 			row.Cells.Flags.Text = tostring(participant.Stats.Flags)
 			row.Cells.Ruins.Text = tostring(participant.Stats.Ruins)
 			local won = participant.Team == state.Winner
-			row.Cells.Status.Text = won and "WINNER" or "ELIMINATED"
+			row.Cells.Status.Text = won and "WINNER" or (placement and ("#" .. tostring(placement[participant.Team] or "?")) or "ELIMINATED")
 			row.Cells.Status.TextColor3 = won and COLORS.Gold or COLORS.Danger
 		end
 	end

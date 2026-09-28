@@ -271,6 +271,71 @@ function ItemService.Sell(player, participant, slot)
 	return true, value
 end
 
+-- Royale loot ---------------------------------------------------------------------------
+-- Equip an item picked up from the ground: no gold, no shop, no class lock (Royale has no
+-- classes). Fills the first free slot of the item's kind, otherwise swaps it with the
+-- replace slot (E/R mythic: the R slot, boots: the boot slot, passives: the last passive).
+-- Returns ok, message, replacedItemId (the caller drops the replaced item on the ground).
+function ItemService.Grant(participant, itemId)
+	local item = ItemDefinitions.GetItem(itemId)
+	if not item or not participant then
+		return false, "Unknown item"
+	end
+	if ownsItem(participant, itemId) then
+		return false, "You already carry " .. item.Name
+	end
+	local replaced = nil
+	if item.SlotType == "Boots" then
+		replaced = participant.Boots
+		participant.Boots = itemId
+	elseif item.SlotType == "Passive" then
+		local passives = passivesOf(participant)
+		local free = nil
+		for slot = 1, MAX_PASSIVES do
+			if not passives[slot] then
+				free = slot
+				break
+			end
+		end
+		free = free or MAX_PASSIVES
+		replaced = passives[free]
+		passives[free] = itemId
+	else
+		local mythics = mythicsOf(participant)
+		local slot = firstEmptySlot(participant) or MAX_SLOTS
+		replaced = mythics[slot]
+		mythics[slot] = itemId
+		participant.ItemReadyAt[itemId] = Util.Now() + 1
+	end
+	changed(participant)
+	return true, item.Name, replaced
+end
+
+-- Remove an equipped item (Royale: the player drops it on the ground).
+-- slot: 1 / 2 (E / R), BOOT_SLOT, or PASSIVE_BASE + n. Returns the removed item id.
+function ItemService.Unequip(participant, slot)
+	if not participant or type(slot) ~= "number" then
+		return nil
+	end
+	local removed = nil
+	if slot == BOOT_SLOT then
+		removed = participant.Boots
+		participant.Boots = nil
+	elseif slot > PASSIVE_BASE and slot <= PASSIVE_BASE + MAX_PASSIVES then
+		local passives = passivesOf(participant)
+		removed = passives[slot - PASSIVE_BASE]
+		passives[slot - PASSIVE_BASE] = nil
+	elseif isValidSlot(slot) then
+		local mythics = mythicsOf(participant)
+		removed = mythics[slot]
+		mythics[slot] = nil
+	end
+	if removed then
+		changed(participant)
+	end
+	return removed
+end
+
 -- Slot 1 <-> Slot 2. Hotkeys follow slots automatically (slot 1 = E, slot 2 = R).
 function ItemService.Swap(player, participant)
 	if MatchManager.State ~= STATE.ACTIVE then

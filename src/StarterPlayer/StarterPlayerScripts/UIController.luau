@@ -13,6 +13,7 @@ local HUD = require(script.Parent:WaitForChild("HUD"))
 local ResultsUI = require(script.Parent:WaitForChild("ResultsUI"))
 local Notifications = require(script.Parent:WaitForChild("Notifications"))
 local ShopUI = require(script.Parent:WaitForChild("ShopUI"))
+local RoyaleUI = require(script.Parent:WaitForChild("RoyaleUI"))
 
 -- Constants
 local STATE = Constants.MatchState
@@ -53,6 +54,13 @@ function UIController.Init(clientState, combatController)
 	UIController.Results = results
 	UIController.Notifications = notifications
 	UIController.Shop = shop
+	-- Royale deploy map / zone overlay + health potions (both modes); pcall like the shop
+	local royaleOk, royale = pcall(RoyaleUI.new, screen, clientState)
+	if not royaleOk then
+		warn("[Ruinfall] Royale UI failed to build:", royale)
+		royale = { Update = function() end, Tick = function() end }
+	end
+	UIController.Royale = royale
 
 	clientState.Notified:Connect(function(payload)
 		notifications:Push(payload)
@@ -82,11 +90,13 @@ function UIController.Init(clientState, combatController)
 		hud:Update(state)
 		results:Update(state)
 		shop:Update(state)
+		royale:Update(state)
 	end)
 	applyMatchState(clientState.GetMatchState())
 
 	RunService.RenderStepped:Connect(function()
 		hud:Tick()
+		royale:Tick()
 	end)
 end
 

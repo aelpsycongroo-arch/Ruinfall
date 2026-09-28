@@ -19,6 +19,14 @@ local RuinService = require(script.Parent:WaitForChild("RuinService"))
 local VisibilityService = require(script.Parent:WaitForChild("VisibilityService"))
 local BotService = require(script.Parent:WaitForChild("BotService"))
 
+-- Loaded lazily: they require ItemService, which requires this module (no require cycle)
+local function getLoot()
+	return require(script.Parent:WaitForChild("LootService"))
+end
+local function getRoyale()
+	return require(script.Parent:WaitForChild("RoyaleService"))
+end
+
 -- Constants
 local STATE = Constants.MatchState
 local MATCH = Constants.Match
@@ -35,6 +43,15 @@ local matchRunId = 0
 local random = Random.new()
 
 -- Functions
+-- The 18-player free-for-all (its own match flow: RunRoyaleMatch). Team matches never use it.
+function MatchManager.IsRoyale()
+	local context = MatchManager.Context
+	if context then
+		return context.Royale == true
+	end
+	return Constants.IsRoyale(PlayerService.Mode)
+end
+
 function MatchManager.BuildState()
 	local context = MatchManager.Context
 	local host = PlayerService.GetHost()
@@ -50,6 +67,9 @@ function MatchManager.BuildState()
 		ActiveTeams = context and context.ActiveTeams or nil,
 		StartedAt = context and context.StartedAt or 0,
 		Winner = context and context.Winner or nil,
+		WinnerName = context and context.WinnerName or nil,
+		Royale = MatchManager.IsRoyale() and getRoyale().Serialize() or nil,
+		MapName = context and context.Map and context.Map.MapName or nil,
 		EliminationOrder = context and context.EliminationOrder or nil,
 		Teams = BaseService.Serialize(),
 		Ruins = RuinService.Serialize(),
@@ -118,8 +138,24 @@ local function onHeroDied(entity, killer)
 	if participant.IsBot then
 		BotService.Detach(participant)
 	end
+	local deathPosition = CombatService.GetPosition(entity)
 	PlayerService.DespawnHero(participant, 2.5)
 	if MatchManager.State ~= STATE.ACTIVE then
+		return
+	end
+	if MatchManager.Context and MatchManager.Context.Royale then
+		-- free for all: no respawn, everything the hero carried spills onto the ground
+		participant.State = "Eliminated"
+		participant.RespawnAt = nil
+		getLoot().DropAll(participant, deathPosition)
+		table.insert(MatchManager.Context.EliminationOrder, participant.Team)
+		PlayerService.SetPlayerAttributes(participant)
+		local remaining = getRoyale().CountAlive()
+		Net.Notify(nil, string.format("%s was slain by %s - %d remain", participant.Name, describeKiller(killer), remaining), "Info")
+		if participant.Player then
+			Net.Notify(participant.Player, "ELIMINATED", "Danger", { Banner = true, Sub = string.format("You placed #%d. Spectating.", remaining + 1) })
+		end
+		MatchManager.Broadcast()
 		return
 	end
 	local team = participant.Team
@@ -227,6 +263,8 @@ function MatchManager.CheckVictory()
 end
 
 local function stopGameplay()
+	getLoot().Stop()
+	getRoyale().Stop()
 	BotService.Stop()
 	MonsterService.Stop()
 	RuinService.Stop()
@@ -237,6 +275,8 @@ local function stopGameplay()
 end
 
 function MatchManager.Cleanup()
+	getLoot().Cleanup()
+	getRoyale().Cleanup()
 	BotService.Cleanup()
 	MonsterService.Cleanup()
 	RuinService.Cleanup()
@@ -266,7 +306,14 @@ function MatchManager.EndMatch(winner)
 			CombatService.Stun(participant.Entity, 120)
 		end
 	end
-	local winnerName = winner and Constants.GetTeamName(winner) or "Nobody"
+	if context.Royale and winner then
+		for _, participant in ipairs(PlayerService.GetParticipants()) do
+			if participant.Team == winner then
+				context.WinnerName = participant.Name
+			end
+		end
+	end
+	local winnerName = context.WinnerName or (winner and Constants.GetTeamName(winner)) or "Nobody"
 	print(string.format("[Ruinfall] Match over | seed=%d winner=%s duration=%ds", context.Seed, winnerName, math.floor(Util.Now() - context.StartedAt)))
 	setState(STATE.ENDING, MATCH.ENDING_DURATION)
 	task.wait(MATCH.ENDING_DURATION)
@@ -280,7 +327,110 @@ function MatchManager.EndMatch(winner)
 	setState(STATE.LOBBY)
 end
 
+-- Royale: PREPARING -> GENERATING -> DEPLOYING (pick a landing spot) -> STARTING -> ACTIVE
+function MatchManager.RunRoyaleMatch()
+	matchRunId += 1
+	local myRun = matchRunId
+	local Royale, Loot = getRoyale(), getLoot()
+	returnRequested = false
+	setState(STATE.PREPARING)
+	local activeTeams, slotCount = PlayerService.AssignTeams()
+	if #activeTeams < 2 then
+		Net.Notify(nil, "At least two players or bots are required", "Danger")
+		setState(STATE.LOBBY)
+		return
+	end
+	local seed = Constants.FORCED_SEED or random:NextInteger(1, 2 ^ 30)
+	local context = {
+		Seed = seed, SlotCount = slotCount, ActiveTeams = activeTeams, Mode = PlayerService.Mode, Royale = true,
+		StartedAt = 0, Winner = nil, EliminatedTeams = {}, EliminationOrder = {},
+	}
+	MatchManager.Context = context
+	print(string.format("[Ruinfall] Preparing ROYALE | seed=%d participants=%d", seed, #PlayerService.GetParticipants()))
+	setState(STATE.GENERATING)
+	local ok, err = pcall(function()
+		local mapData = MapGenerator.GenerateRoyale(seed)
+		context.Map = mapData
+		CombatService.BeginMatch(mapData)
+		MonsterService.Setup(mapData)
+		RuinService.Setup(mapData, seed)
+		VisibilityService.Setup(mapData, activeTeams)
+		Loot.Setup(mapData, true)
+		Royale.Setup(mapData, seed)
+	end)
+	if not ok then
+		warn("[Ruinfall] Royale setup failed:", err)
+		Net.Notify(nil, "Match setup failed - see server output", "Danger")
+		MatchManager.Cleanup()
+		setState(STATE.LOBBY)
+		return
+	end
+
+	setState(STATE.DEPLOYING, Constants.Royale.DEPLOY_TIME)
+	Net.Notify(nil, "CHOOSE YOUR LANDING SPOT", "Info", { Banner = true, Sub = "Click the map - nobody else can land near your pick" })
+	local landing = Royale.RunDeploy(MatchManager.Broadcast)
+	if matchRunId ~= myRun then
+		return
+	end
+
+	setState(STATE.STARTING, MATCH.START_COUNTDOWN)
+	local pending = 0
+	for participant, point in pairs(landing) do
+		pending += 1
+		task.spawn(function()
+			local spawnOk, spawnErr = pcall(MatchManager.SpawnParticipant, participant, point + Vector3.new(0, 0.2, 0), true)
+			if not spawnOk then
+				warn("[Ruinfall] Spawn error:", spawnErr)
+			end
+			pending -= 1
+		end)
+	end
+	local waitStarted = os.clock()
+	while pending > 0 and os.clock() - waitStarted < 10 do
+		task.wait(0.1)
+	end
+	while Util.Now() < MatchManager.StateEndsAt do
+		task.wait(0.1)
+	end
+	if matchRunId ~= myRun then
+		return
+	end
+
+	context.StartedAt = Util.Now()
+	setState(STATE.ACTIVE)
+	for _, participant in ipairs(PlayerService.GetParticipants()) do
+		if participant.Entity then
+			CombatService.ClearStun(participant.Entity)
+		elseif participant.State ~= "Alive" then
+			participant.State = "Eliminated" -- could not spawn: out of this round
+		end
+	end
+	CombatService.Start()
+	MonsterService.Start()
+	VisibilityService.Start()
+	BotService.Start()
+	Loot.Start()
+	Royale.Start()
+	Net.Notify(nil, "LAST ONE STANDING WINS", "Info", { Banner = true, Sub = "Break ruins for skills and gear. Stay inside the zone." })
+
+	while MatchManager.State == STATE.ACTIVE and matchRunId == myRun do
+		task.wait(0.25)
+		local loopOk, loopErr = pcall(function()
+			local alive, last = Royale.CountAlive()
+			if alive <= 1 then
+				MatchManager.EndMatch(last and last.Team or nil)
+			end
+		end)
+		if not loopOk then
+			warn("[Ruinfall] Royale loop error:", loopErr)
+		end
+	end
+end
+
 function MatchManager.RunMatch()
+	if Constants.IsRoyale(PlayerService.Mode) then
+		return MatchManager.RunRoyaleMatch()
+	end
 	matchRunId += 1
 	local myRun = matchRunId
 	returnRequested = false
@@ -317,6 +467,7 @@ function MatchManager.RunMatch()
 		MonsterService.Setup(mapData)
 		RuinService.Setup(mapData, seed)
 		VisibilityService.Setup(mapData, activeTeams)
+		getLoot().Setup(mapData, false) -- health potions from camp monsters
 	end)
 	if not ok then
 		warn("[Ruinfall] Match setup failed:", err)
@@ -370,6 +521,7 @@ function MatchManager.RunMatch()
 	RuinService.Start()
 	VisibilityService.Start()
 	BotService.Start()
+	getLoot().Start()
 	Net.Notify(nil, "FIGHT!", "Info", { Banner = true, Sub = "Destroy enemy flags. Protect your own." })
 
 	while MatchManager.State == STATE.ACTIVE and matchRunId == myRun do
@@ -392,6 +544,8 @@ function MatchManager.Init()
 			onHeroDied(entity, killer)
 		end
 	end)
+	getLoot().Init()
+	getRoyale().Init()
 	PlayerService.Changed:Connect(function()
 		if MatchManager.State == STATE.LOBBY then
 			MatchManager.Broadcast()

@@ -144,7 +144,9 @@ local function buildGui()
 	for index = 1, 3 do
 		local button = find(root, "WarParty.Panel.Mode" .. index, "TextButton")
 		table.insert(connections, button.Activated:Connect(function()
-			local mode = lastSnapshot and lastSnapshot.Modes[index]
+			local mine = lastSnapshot and myLobby(lastSnapshot)
+			local modes = mine and mine.Modes or (lastSnapshot and lastSnapshot.Modes) or {}
+			local mode = modes[index]
 			if mode then
 				send("SetMode", mode.Key)
 			end
@@ -211,7 +213,7 @@ function render(snapshot)
 			card.Tint.ImageColor3 = Theme.TintColor(lobby.Color)
 			card.Name.Text = numerals(lobby.Name)
 			card.Name.TextColor3 = lobby.Color
-			card.Sub.Text = lobby.Title
+			card.Sub.Text = lobby.Blurb or lobby.Title
 			local state = lobby.State == "Launching" and "MARCHING OUT" or string.upper(lobby.ModeLabel)
 			card.Info.Text = string.format("%s  |  %d / %d", state, #lobby.Members, lobby.Max)
 			local isMine = mine ~= nil and mine.Id == lobby.Id
@@ -233,8 +235,9 @@ function render(snapshot)
 	party.Gate.Text = mine.Title
 	party.Count.Text = string.format("%d / %d", #mine.Members, mine.Max)
 	renderMembers(mine)
+	local modes = mine.Modes or snapshot.Modes -- each gate offers only its own game mode(s)
 	for index, button in ipairs(party.Modes) do
-		local mode = snapshot.Modes[index]
+		local mode = modes[index]
 		button.Visible = mode ~= nil
 		if mode then
 			button.Text = string.upper(mode.Label)
@@ -243,7 +246,7 @@ function render(snapshot)
 		end
 	end
 	local launching = mine.State == "Launching"
-	party.HostHint.Text = amHost and "You are the host - pick a mode and march when ready" or "Waiting for the host to start..."
+	party.HostHint.Text = amHost and (#modes > 1 and "You are the host - pick a mode and march when ready" or "You are the host - march when ready") or "Waiting for the host to start..."
 	party.Start.Visible = amHost
 	party.Start.Text = launching and "MARCHING OUT..." or "MARCH TO BATTLE"
 	setStyle(party.Start, launching and "Disabled" or "Primary")

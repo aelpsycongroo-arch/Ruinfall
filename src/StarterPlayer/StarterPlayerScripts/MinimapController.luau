@@ -187,6 +187,30 @@ local function updateDynamic()
 		icon.Position = toMap(ruin.Position)
 		icon.BackgroundColor3 = COLORS.Gold
 	end
+	-- Royale: shrinking play zone (purple), the next zone (white) and gear lying around
+	local royale = state.Royale
+	if royale and royale.Zone then
+		local zone = royale.Zone
+		local function zoneRing(kind, color, x, z, radius, thickness)
+			local ringFrame = acquire(kind, function()
+				local frame = New("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), BackgroundTransparency = 1, ZIndex = 6 })
+				New("UICorner", { CornerRadius = UDim.new(0.5, 0), Parent = frame })
+				UITheme.Stroke(frame, color, thickness, 0)
+				return frame
+			end)
+			ringFrame.Position = toMap(Vector3.new(x, 0, z))
+			ringFrame.Size = UDim2.fromOffset(radius * 2 * scale, radius * 2 * scale)
+		end
+		zoneRing("ZoneNext", Color3.fromRGB(245, 245, 255), zone.NextX, zone.NextZ, zone.NextRadius, 1)
+		zoneRing("Zone", Color3.fromRGB(190, 110, 255), zone.X, zone.Z, zone.Radius, 2)
+		for _, loot in ipairs(royale.Loot or {}) do
+			if loot.Kind ~= "Potion" then
+				local icon = acquire("Loot", diamondFactory(6))
+				icon.Position = toMap(loot.Position)
+				icon.BackgroundColor3 = loot.Kind == "Skill" and Color3.fromRGB(200, 150, 255) or Color3.fromRGB(255, 200, 90)
+			end
+		end
+	end
 	for _, fragment in ipairs(state.Fragments or {}) do
 		local icon = acquire("Fragment", diamondFactory(8))
 		icon.Position = toMap(fragment.Position)

@@ -45,6 +45,9 @@ function ShopService.CanShop(participant)
 	if MatchManager.State ~= STATE.ACTIVE then
 		return false, "Shop is only available during a match"
 	end
+	if MatchManager.IsRoyale and MatchManager.IsRoyale() then
+		return false, "No shop in Free For All - break ruins to find gear"
+	end
 	if not participant or participant.Spectator then
 		return false, "Spectators cannot shop"
 	end
@@ -69,6 +72,10 @@ function ShopService.HandleRequest(player, itemKey)
 	end
 	local participant = PlayerService.GetParticipantByPlayer(player)
 	if not participant or participant.Spectator then
+		return
+	end
+	if MatchManager.IsRoyale and MatchManager.IsRoyale() then
+		Net.Notify(player, "No shop in Free For All - break ruins to find gear", "Warning")
 		return
 	end
 	-- Must be alive near base, or dead (respawn at base)

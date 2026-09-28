@@ -337,6 +337,11 @@ function ShopUI.new(screen, clientState)
 			return
 		end
 		if input.KeyCode == Enum.KeyCode.B then
+			local game = self.ClientState and self.ClientState.Game
+			if game and game.Royale then
+				self:SetVisible(false) -- free for all: no shop, gear comes from ruins
+				return
+			end
 			self:SetVisible(not self.Root.Visible)
 		end
 	end)

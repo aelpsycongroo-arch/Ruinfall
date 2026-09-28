@@ -23,6 +23,8 @@ local REMOTE_NAMES = {
 	"HubRequest", -- hub hall: Join / Leave / SetMode / Start / Sync (+ ReturnToHall on match servers)
 	"HubState", -- hub hall: ("State", snapshot) / ("Notice", { Text, Style })
 	"AudioEvent", -- audio: client Load/SaveSettings; server ("Settings", t) / ("Cue", { Cue, Position }) - see AudioService
+	"LootRequest", -- ("UsePotion") both modes; ("Drop", slot) Royale - see LootService
+	"RoyaleRequest", -- Royale deploy: ("Pick", Vector3 landing spot) - see RoyaleService
 }
 
 -- State

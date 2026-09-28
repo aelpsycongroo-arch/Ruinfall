@@ -151,10 +151,13 @@ function AbilityBar:Update(me)
 		return
 	end
 	local q = self.Slots.Q
-	self.QManaCost = classDef.Ability and classDef.Ability.ManaCost or 0
-	local abilityName = classDef.Ability and classDef.Ability.Name or "ABILITY"
+	-- Royale: the Q skill is looted (me.Skill = the class it came from); none yet = "NO SKILL"
+	local ability = ClassDefinitions.GetAbility(me.ClassKey, me.Skill)
+	local skillClass = me.Skill and me.Skill ~= "" and ClassDefinitions.Get(me.Skill) or classDef
+	self.QManaCost = ability and ability.ManaCost or 0
+	local abilityName = ability and ability.Name or (me.ClassKey == "Wanderer" and "NO SKILL" or "ABILITY")
 	setText(q.Name, string.upper(abilityName))
-	q.Icon.Image = Theme.AbilityIcons[abilityName] or classDef.IconImage or A.IconBloodRush
+	q.Icon.Image = Theme.AbilityIcons[abilityName] or skillClass.IconImage or (ability and A.IconBloodRush or "")
 	local lm = self.Slots.LM
 	local melee = classDef.AttackType == "Melee"
 	setText(lm.Name, melee and "MELEE" or "SHOOT")

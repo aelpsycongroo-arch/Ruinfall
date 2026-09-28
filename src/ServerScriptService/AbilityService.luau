@@ -117,6 +117,9 @@ function AbilityService.Use(entity, aimPosition)
 	if CombatService.IsStunned(entity) or now < entity.AbilityReadyAt - COOLDOWN_GRACE then
 		return false
 	end
+	if not entity.Class.Ability then
+		return false, "No skill yet - break ruins to find one" -- Royale Wanderer
+	end
 	-- Q costs mana when the class ability sets ManaCost (Mage Arcane Burst: 80); spent only if the cast succeeds
 	local manaCost = entity.Class.Ability.ManaCost or 0
 	if manaCost > 0 and (entity.Mana or 0) < manaCost then
