@@ -307,10 +307,38 @@ SKILLS = {
 
 # ---------------------------------------------------------------- class emblems (class picker / HUD)
 # Same painted look as the items: the class's signature weapon over a themed effect.
+def assassin_dagger(cv, ang, off, flip=1):
+    """Short broad curved blade, tiny guard, long wrapped grip and a ring pommel (reads as a dagger)."""
+    def T(pts):
+        return tf([(50 + (x - 50) * flip, y) for x, y in pts], ang=ang, s=1.0, off=off)
+    tip, base = 14, 54
+    left = bez((50, tip), (43, tip + 16), (43, base - 6), (44.5, base), n=18)
+    right = bez((50, tip), (60, tip + 12), (57, base - 10), (55.5, base), n=18)
+    ridge = bez((50, tip + 2), (49, tip + 20), (50, base), n=12)
+    cv.part(M_poly(T(left + ridge[::-1])), "steel", round=0.8, streak=0.15, outline=0.7, flat=0.3)
+    cv.part(M_poly(T(ridge + right[::-1])), "steel", color=darken((160, 170, 185), 0.35), round=0.8, streak=0.15, outline=0.7, flat=0.5)
+    cv.add((255, 255, 255), M_line(T(ridge[2:-2]), 0.3), 0.5)
+    cv.glow(M_line(T(right), 0.35), (255, 70, 90), k=0.9, r=1.0)
+    cv.glow(M_line(T(left), 0.25), (255, 70, 90), k=0.5, r=0.8)
+    guard = bez((41, base - 2), (46, base + 1.5), (50, base + 1), n=8) + bez((50, base + 1), (54, base + 1.5), (59, base - 2), n=8) + \
+        [(60, base + 1)] + bez((57, base + 3.5), (53, base + 4.5), (50, base + 4.2), n=8) + bez((50, base + 4.2), (47, base + 4.5), (43, base + 3.5), n=8) + [(40, base + 1)]
+    cv.part(M_poly(T(guard)), "darksteel", round=1.0)
+    cv.gem(*T([(50, base + 2)])[0], 1.5, (230, 40, 70))
+    grip = [(48.2, base + 4), (51.8, base + 4), (52, base + 22), (48, base + 22)]
+    cv.part(M_poly(T(grip)), "leather", color=(45, 22, 26), round=1.0)
+    for i in range(8):
+        y = base + 5 + i * 2.1
+        cv.engrave(T([(48.1, y), (51.9, y + 1.4)]), 0.3, 0.6)
+    cv.part(M_poly(T([(47.6, base + 21.5), (52.4, base + 21.5), (52, base + 23.5), (48, base + 23.5)])), "darksteel", round=0.5)
+    cv.part(M_poly(T([(50, base + 23.5), (52.6, base + 26), (50, base + 30), (47.4, base + 26)])), "darksteel", round=0.6)
+    cv.gem(*T([(50, base + 26.3)])[0], 1.1, (230, 40, 70))
+
+
 def class_assassin(cv, o):
-    import shapes as SH
     F.fx_shadow(cv, color=(120, 30, 60))
-    SH.twin_daggers(cv, dict(edgeglow=(255, 70, 90), guard="darksteel", gem=(230, 40, 70), blade="steel"))
+    # blades cross mid-length, handles spread apart at the bottom (not scissor-like)
+    assassin_dagger(cv, 32, (-8.5, 6))
+    assassin_dagger(cv, -32, (8.5, 6), flip=-1)
     F.fx_bleed(cv, pts=[(30, 80, 1.6), (70, 82, 1.3), (50, 88, 1.1)])
 
 
