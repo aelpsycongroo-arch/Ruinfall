@@ -20,7 +20,7 @@ local AIM_PLANE_HEIGHT = 3
 local ATTACK_ANIMATION = nil -- swings are procedural now (AttackAnimationController)
 local player = Players.LocalPlayer
 local TARGET_TAGS = { "RF_Hero", "RF_Monster", "RF_Creep" }
-local SLOT_INDEX = { E = 1, R = 2, M2 = 3 } -- M2 = right mouse = the separate boot slot
+local SLOT_INDEX = { E = 1, R = 2, SPACE = 3, M2 = 4 } -- M2 = right mouse = the separate boot slot
 local function emptySlotMessage(key)
 	if key == "M2" then
 		return "Right mouse: your boot slot is empty - buy boots in the shop [B]"
@@ -205,7 +205,7 @@ function CombatController.GetSlotItem(key)
 	local me = ClientState.GetMe()
 	local index = SLOT_INDEX[key]
 	local itemId
-	if index == 3 then
+	if key == "M2" then
 		itemId = me and me.Boots
 	else
 		itemId = me and me.Mythics and me.Mythics[index]
@@ -438,7 +438,7 @@ local function tryItemAbility(key)
 end
 
 function CombatController.TryAbility(slot)
-	if slot == "E" or slot == "R" or slot == "M2" then
+	if slot == "E" or slot == "R" or slot == "SPACE" or slot == "M2" then
 		tryItemAbility(slot)
 		return
 	elseif slot ~= "Q" then

@@ -50,19 +50,22 @@ function AbilityBar.new(group, clientState, combatController)
 	self.Remotes = ReplicatedStorage:WaitForChild("Remotes")
 	self.Slots = {}
 	for _, def in ipairs(Theme.Slots) do
-		local slot = "Slot" .. def.Key
+		local frameKey = def.Frame or def.Key -- the painted HUD slot this key uses
+		local slot = "Slot" .. frameKey
 		self.Slots[def.Key] = {
 			Def = def, Frame = find(group, slot, "Frame"), Icon = find(group, slot .. ".Icon", "ImageLabel"), Glyph = find(group, slot .. ".Glyph", "TextLabel"),
 			Cooldown = find(group, slot .. ".Cooldown", "Frame"), Timer = find(group, slot .. ".Timer", "TextLabel"), Count = find(group, slot .. ".Count", "Frame"),
 			CountValue = find(group, slot .. ".Count.Value", "TextLabel"), Ready = find(group, slot .. ".Ready", "UIStroke"),
-			Name = find(group, "Name" .. def.Key, "TextLabel"), KeyLabel = find(group, "Key" .. def.Key, "TextLabel"),
+			Name = find(group, "Name" .. frameKey, "TextLabel"), KeyLabel = find(group, "Key" .. frameKey, "TextLabel"),
 		}
+		setText(self.Slots[def.Key].Name, def.Name)
 	end
 	-- item slot table (same shape the rest of the client used before)
 	self.ItemSlots = {
 		E = { Frame = self.Slots.E.Frame, Index = 1, KeyName = "E" },
 		R = { Frame = self.Slots.R.Frame, Index = 2, KeyName = "R" },
-		M2 = { Frame = self.Slots.MR.Frame, Index = 3, KeyName = "M2", IsBoots = true },
+		SPACE = { Frame = self.Slots.SPACE.Frame, Index = 3, KeyName = "SPACE" },
+		M2 = { Frame = self.Slots.MR.Frame, Index = ItemDefinitions.BOOT_SLOT, KeyName = "M2", IsBoots = true },
 	}
 	-- passive item slots (no hotkey): PASSIVE 1 / 2 / 3, filled from me.Passives
 	self.PassiveSlots = {}
@@ -107,9 +110,9 @@ function AbilityBar:GetPassiveItem(index)
 	return ItemDefinitions.GetItem(itemId)
 end
 
-function AbilityBar:RequestSwap()
-	if self:GetSlotItem("E") or self:GetSlotItem("R") then
-		self.Remotes.ItemRequest:FireServer("Swap")
+function AbilityBar:RequestSwap(from, to)
+	if from and to and from ~= to then
+		self.Remotes.ItemRequest:FireServer("Swap", from, to)
 	end
 end
 
@@ -140,7 +143,7 @@ function AbilityBar:SetupDragging()
 		local mouse = mouseInGui()
 		for _, entry in pairs(self.ItemSlots) do
 			if entry ~= from and not entry.IsBoots and over(entry.Frame, mouse) then
-				self:RequestSwap()
+				self:RequestSwap(from.Index, entry.Index)
 				break
 			end
 		end
@@ -158,9 +161,6 @@ function AbilityBar:Update(me)
 	local abilityName = classDef.Ability and classDef.Ability.Name or "ABILITY"
 	setText(q.Name, string.upper(abilityName))
 	q.Icon.Image = Theme.AbilityIcons[abilityName] or classDef.IconImage or A.IconBloodRush
-	local lm = self.Slots.LM
-	local melee = classDef.AttackType == "Melee"
-	setText(lm.Name, melee and "MELEE" or "SHOOT")
 end
 
 local function cooldown(slot, remaining, total, hasContent, aiming)
@@ -176,8 +176,6 @@ end
 function AbilityBar:Tick(character, now, me)
 	local targeting = self.CombatController and self.CombatController.Targeting
 	if character then
-		local attackCd = character:GetAttribute("AttackCooldown") or 1
-		cooldown(self.Slots.LM, (character:GetAttribute("LastAttackAt") or 0) + attackCd - now, attackCd, true, false)
 		local abilityCd = character:GetAttribute("AbilityCooldown") or 1
 		-- Q with a mana cost (Mage Arcane Burst): tint the icon blue while there is not enough mana
 		local q = self.Slots.Q
@@ -189,7 +187,6 @@ function AbilityBar:Tick(character, now, me)
 		end
 		cooldown(q, (character:GetAttribute("AbilityReadyAt") or 0) - now, abilityCd, not qNoMana, false)
 	else
-		cooldown(self.Slots.LM, 0, 1, false, false)
 		cooldown(self.Slots.Q, 0, 1, false, false)
 	end
 	for key, entry in pairs(self.ItemSlots) do
@@ -284,7 +281,7 @@ function AbilityBar:FitIcons()
 	end
 end
 
--- The LM / Q / E / R / MR tabs painted into the bar art end up underneath the slot frame and
+-- The key tabs painted into the bar art end up underneath the slot frame and
 -- icon. Draw a real badge instead: parented to its slot, centred on it horizontally, resting on
 -- the slot's top edge, above everything in the slot (and large enough to hide the painted tab).
 local BADGE_Z = 12
@@ -296,7 +293,8 @@ function AbilityBar:StyleKeyBadges()
 			badge.Parent = frame
 			badge.AnchorPoint = Vector2.new(0.5, 1)
 			badge.Position = UDim2.new(0.5, 0, 0.1, 0)
-			badge.Size = UDim2.fromScale(0.58, 0.38)
+			-- a full-width plate: wide and tall enough to hide the old painted key tab completely
+			badge.Size = UDim2.fromScale(1.1, 0.46)
 			badge.ZIndex = BADGE_Z
 			badge.Text = slot.Def.Key
 			badge.TextXAlignment = Enum.TextXAlignment.Center

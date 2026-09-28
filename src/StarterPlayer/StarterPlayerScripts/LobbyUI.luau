@@ -98,7 +98,7 @@ function LobbyUI.new(screen, clientState)
 		self.DifficultyButtons[difficulty] = { Button = button, Stroke = stroke }
 	end
 	Label({
-		Text = "CONTROLS\nWASD move  -  Left click attack\nQ ability  -  E / R items  -  Right click boots\nB shop  -  H potion\n\nThe host controls mode, bots and difficulty.",
+		Text = "CONTROLS\nWASD move  -  Left click attack\nQ ability  -  SPACE / E / R items  -  Right click boots\nB shop  -  H potion\n\nThe host controls mode, bots and difficulty.",
 		Font = FONTS.Medium, TextSize = 13, TextColor3 = COLORS.Subtext, TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top,
 		Position = UDim2.fromOffset(18, 430), Size = UDim2.new(1, -36, 0, 60), Parent = modePanel,
 	})

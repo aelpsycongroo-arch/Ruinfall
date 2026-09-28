@@ -381,3 +381,89 @@ CLASSES = {
     "Class_Tank": dict(theme=CLASS["Tank"], draw=class_tank),
     "Class_Fighter": dict(theme=CLASS["Fighter"], draw=class_fighter),
 }
+
+
+# ---------------------------------------------------------------- class active items, set 2
+import shapes as _SH
+
+
+def chakram(cv, o):
+    """A razor ring: a steel hoop with eight curved blades and a wrapped grip bar."""
+    c = o.get("glow", (180, 120, 255))
+    blades = []
+    for k in range(8):
+        a = math.radians(k * 45 + 10)
+        b = a + math.radians(26)
+        blades.append(M_poly([(50 + 30 * math.cos(a - 0.1), 50 + 30 * math.sin(a - 0.1)), (50 + 47 * math.cos(a + 0.35), 50 + 47 * math.sin(a + 0.35)),
+                              (50 + 38 * math.cos(b), 50 + 38 * math.sin(b)), (50 + 30 * math.cos(b + 0.1), 50 + 30 * math.sin(b + 0.1))]))
+    cv.part(U(*blades), "steel", round=0.8, streak=0.15, outline=0.6)
+    for k in range(8):
+        a = math.radians(k * 45 + 10)
+        cv.glow(M_line([(50 + 31 * math.cos(a - 0.05), 50 + 31 * math.sin(a - 0.05)), (50 + 46 * math.cos(a + 0.34), 50 + 46 * math.sin(a + 0.34))], 0.35), c, k=0.8, r=0.9)
+    cv.part(M_ring(50, 50, 28, 5), "darksteel", round=2.0, streak=0.1)
+    cv.part(M_ring(50, 50, 29, 1.2), "gold", round=0.5, shadow=0)
+    cv.part(M_poly([(30, 47), (70, 47), (70, 53), (30, 53)]), "leather", color=(60, 30, 40), round=1.0)
+    for x in range(33, 69, 4):
+        cv.engrave([(x, 47), (x + 2, 53)], 0.3, 0.6)
+    cv.gem(50, 50, 4, c)
+
+
+def bear_trap(cv, o):
+    """Open iron jaws with jagged teeth on a round base plate, spring and chain."""
+    cv.part(M_ell(50, 58, 34, 14), "darksteel", round=2.5, streak=0.1)
+    cv.part(M_ell(50, 58, 10, 5), "steel", round=1.5)
+    for sy, ry in ((-1, 26), (1, 12)):
+        pts = arc_pts(50, 56, 32, ry, 180 if sy < 0 else 0, 360 if sy < 0 else 180, 40)
+        cv.part(M_line(pts, 2.2), "steel", round=0.8, streak=0.15)
+        teeth = []
+        for k in range(1, 12):
+            t = k / 12
+            a = math.radians((180 if sy < 0 else 0) + 180 * t)
+            x, y = 50 + 32 * math.cos(a), 56 + ry * math.sin(a)
+            teeth.append(M_poly([(x - 2.2, y), (x + 2.2, y), (x, y - sy * -1 * 6 if sy > 0 else y + 6)]))
+        cv.part(U(*teeth), "steel", round=0.4, outline=0.5)
+    for side in (-1, 1):
+        cv.part(M_line([(50 + side * 34, 58), (50 + side * 40, 72)], 1.6), "darksteel", round=0.6)
+    cv.part(M_line(bez((50, 70), (48, 82), (60, 90), n=10), 1.2), "steel", round=0.4)
+    cv.glow(M_line(arc_pts(50, 56, 32, 26, 185, 355, 30), 0.35), o.get("glow", (255, 210, 120)), k=0.5, r=0.9)
+
+
+_SH.chakram = chakram
+_SH.bear_trap = bear_trap
+
+ITEMS.update({
+    # Assassin
+    "NightfallDagger": E((120, 50, 180), "dagger", dict(ang=40, edgeglow=(200, 120, 255), guard="darksteel", gem=(170, 70, 230)), pre=[fx("shadow", color=(90, 30, 130))], post=[fx("mark", color=(200, 120, 255))]),
+    "ViperFang": E((90, 160, 60), "dagger", dict(ang=-40, edgeglow=(160, 255, 90), guard="bronze", gem=(100, 210, 60)), post=[fx("poison")]),
+    "ReapersSigil": E((170, 30, 60), "pendant", dict(shape="tear", gem=(230, 30, 60)), pre=[fx("souls", color=(255, 90, 110))], post=[fx("mark")]),
+    "TwilightChakram": E((140, 90, 210), "chakram", dict(glow=(190, 130, 255)), pre=[fx("whirl", color=(170, 110, 255))]),
+    "MirageCloak": E((100, 100, 170), "cloak", dict(tint=(70, 70, 130), eyes=(210, 210, 255), gem=(150, 150, 255)), pre=[fx("ghost", color=(170, 170, 255))], post=[fx("speed", color=(190, 190, 255))]),
+    # Mage
+    "StormcallerRod": E((90, 150, 255), "staff", dict(ang=24, gem=(130, 190, 255)), post=[fx("chain_lightning")]),
+    "MeteorCodex": E((220, 100, 40), "tome", dict(cover=(120, 40, 20), gem=(255, 130, 40)), post=[fx("meteor")]),
+    "VoidPrism": E((120, 60, 190), "crystal_cluster", dict(color=(150, 80, 230)), pre=[fx("souls", color=(170, 100, 255))]),
+    "RunewardAmulet": E((80, 170, 230), "pendant", dict(shape="round", gem=(90, 190, 255)), pre=[fx("runes", color=(120, 200, 255))], post=[fx("shield_dome", color=(120, 200, 255))]),
+    "ChronoHourglass": E((210, 180, 90), "gear", dict(mat="gold", gem=(240, 210, 120)), pre=[fx("rewind", color=(250, 220, 140))]),
+    # Marksman
+    "HawkeyeArbalest": E((170, 130, 70), "bow", dict(mat="darksteel", glow=(255, 220, 120), gem=(255, 200, 80)), post=[fx("target_range")]),
+    "TrappersKit": E((150, 130, 90), "bear_trap", dict(glow=(255, 210, 120))),
+    "StalkersSpyglass": E((200, 170, 80), "lens", dict(mat="gold", glass=(200, 230, 255)), post=[fx("mark", color=(255, 200, 80))]),
+    "ScatterCrossbow": E((150, 110, 60), "bow", dict(ang=0, tint=(110, 80, 50), glow=(255, 180, 90)), post=[fx("knife_fan", color=(255, 190, 110))]),
+    "StormstringQuiver": E((110, 190, 100), "quiver", dict(glow=(160, 255, 130)), pre=[fx("wind", color=(170, 255, 150))]),
+    # Tank
+    "TitansChain": E((140, 140, 160), "chain", dict(), pre=[fx("ground_crack", color=(190, 190, 210))]),
+    "BellowingHelm": E((200, 140, 60), "crown", dict(mat="steel", gem=(255, 160, 60)), pre=[fx("sound_waves", color=(255, 190, 90))]),
+    "StoneskinIdol": E((150, 145, 130), "core", dict(glow=(220, 210, 180)), pre=[fx("tenacity", color=(230, 220, 190))]),
+    "EarthsplitterMaul": E((170, 110, 60), "hammer", dict(tint=(120, 90, 60), gem=(255, 150, 60)), post=[fx("ground_crack", color=(255, 160, 70))]),
+    "SanctuaryTotem": E((230, 200, 120), "bell", dict(gem=(255, 230, 150)), pre=[fx("rescue")], post=[fx("heal_motes", color=(255, 235, 160))]),
+    # Fighter
+    "Bloodthirster": E((190, 30, 40), "sword", dict(edgeglow=(255, 60, 70), gem=(230, 30, 50), guard="darksteel"), pre=[fx("lifesteal")]),
+    "RavagersSpear": E((180, 90, 50), "arrow", dict(ang=45, length=92, head="darksteel", glow=(255, 150, 80), fletch=(150, 50, 40)), pre=[fx("speed", color=(255, 170, 110))], post=[fx("bleed")]),
+    "WarlordsBanner": E((200, 50, 45), "banner", dict(cloth=(180, 35, 35)), pre=[fx("rage", color=(255, 90, 60))]),
+    "ExecutionersGreataxe": E((130, 40, 40), "axe", dict(double=True, tint=(90, 50, 50), edgeglow=(255, 60, 50), gem=(200, 30, 30)), post=[fx("mark", color=(255, 60, 50))]),
+    "UndyingHeart": E((210, 50, 70), "golem_heart", dict(glow=(255, 80, 100)), pre=[fx("souls", color=(255, 110, 130))]),
+})
+NEW_CLASS_ITEMS = ["NightfallDagger", "ViperFang", "ReapersSigil", "TwilightChakram", "MirageCloak", "StormcallerRod", "MeteorCodex", "VoidPrism",
+                   "RunewardAmulet", "ChronoHourglass", "HawkeyeArbalest", "TrappersKit", "StalkersSpyglass", "ScatterCrossbow", "StormstringQuiver",
+                   "TitansChain", "BellowingHelm", "StoneskinIdol", "EarthsplitterMaul", "SanctuaryTotem", "Bloodthirster", "RavagersSpear",
+                   "WarlordsBanner", "ExecutionersGreataxe", "UndyingHeart"]

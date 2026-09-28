@@ -705,6 +705,11 @@ function CombatService.ApplyDamage(source, target, rawAmount, info)
 		Net.Effect("Damage", { Position = CombatService.GetPosition(target), Amount = 0, Kind = "Miss", TargetId = target.Id, SourceId = source.Id })
 		return 0
 	end
+	-- Evasion (item skills): basic attacks against an evading unit miss
+	if info.BasicAttack and (target.EvadeUntil or 0) > Util.Now() then
+		Net.Effect("Damage", { Position = CombatService.GetPosition(target), Amount = 0, Kind = "Miss", TargetId = target.Id, SourceId = source and source.Id or nil })
+		return 0
+	end
 	-- Flag ward: flags can only be damaged by heroes standing inside siege range
 	if target.Kind == "Flag" and source and source.Kind == "Hero" then
 		local siegeRange = Constants.Flag.SIEGE_RANGE + target.Radius
@@ -727,6 +732,14 @@ function CombatService.ApplyDamage(source, target, rawAmount, info)
 		end
 		amount = (amount + ctx.TrueBonus) * ctx.Reduction
 	end
+	-- item skills: marked targets take more damage (Vulnerable), braced ones less (DamageReduction)
+	local hookNow = Util.Now()
+	if (target.VulnerableUntil or 0) > hookNow then
+		amount *= 1 + (target.VulnerableAmount or 0)
+	end
+	if (target.DamageReductionUntil or 0) > hookNow then
+		amount *= 1 - math.clamp(target.DamageReductionAmount or 0, 0, 0.9)
+	end
 	local absorbed = 0
 	if target.Shield > 0 then
 		absorbed = math.min(target.Shield, amount)
@@ -734,6 +747,9 @@ function CombatService.ApplyDamage(source, target, rawAmount, info)
 		amount -= absorbed
 	end
 	target.Health -= amount
+	if (target.UndyingUntil or 0) > hookNow and target.Health < 1 then
+		target.Health = 1 -- Last Stand: cannot drop below 1 health
+	end
 	target.LastDamagedAt = Util.Now()
 	if source then
 		target.LastAttacker = source

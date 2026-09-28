@@ -448,7 +448,7 @@ function PlayerService.ResetForLobby()
 		participant.Stats = freshStats()
 		participant.Purchases = {}
 		participant.PurchaseTimestamps = {}
-		participant.Mythics = {} -- [1] = item id (-> E), [2] = item id (-> R)
+		participant.Mythics = {} -- [1] = item id (-> E), [2] = (-> R), [3] = (-> SPACE)
 		participant.Boots = nil -- separate boot slot (-> right mouse)
 		participant.Passives = {} -- [1..3] = passive item ids (automatic effects, no hotkey)
 		participant.PassiveStacks = {} -- per-match stacking passives, e.g. SoulHarvest = +HP (PassiveService)
@@ -571,7 +571,11 @@ function PlayerService.Serialize()
 			Purchases = participant.Purchases or {},
 		PurchaseTimestamps = participant.PurchaseTimestamps or {},
 			-- "" marks an empty mythic slot (arrays can't hold nil holes over the network)
-			Mythics = { (participant.Mythics and participant.Mythics[1]) or "", (participant.Mythics and participant.Mythics[2]) or "" },
+			Mythics = {
+				(participant.Mythics and participant.Mythics[1]) or "",
+				(participant.Mythics and participant.Mythics[2]) or "",
+				(participant.Mythics and participant.Mythics[3]) or "",
+			},
 			Boots = participant.Boots or "",
 			Passives = {
 				(participant.Passives and participant.Passives[1]) or "",

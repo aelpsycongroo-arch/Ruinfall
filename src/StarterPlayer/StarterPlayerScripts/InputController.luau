@@ -45,6 +45,13 @@ function InputController.Init(combatController)
 			CombatController.TryAbility("R")
 		end
 	end)
+	-- SPACE = third active item. Bound above the default jump action so it never jumps.
+	game:GetService("ContextActionService"):BindActionAtPriority("RuinfallSpaceItem", function(_, state)
+		if state == Enum.UserInputState.Begin and not UserInputService:GetFocusedTextBox() then
+			CombatController.TryAbility("SPACE")
+		end
+		return Enum.ContextActionResult.Sink
+	end, false, Enum.ContextActionPriority.High.Value + 10, Enum.KeyCode.Space)
 	UserInputService.InputEnded:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then
 			CombatController.SetAttackHeld(false)

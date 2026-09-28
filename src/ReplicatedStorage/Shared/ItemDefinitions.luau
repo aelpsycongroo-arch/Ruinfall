@@ -17,10 +17,10 @@ local ItemDefinitions = {}
 -- MAGE item skills scale on Magic Power instead ({ MP = x }: the Mage's base Magic Power +
 -- Magic Power from items) and ALL of them cost mana - boot skills included (ability.ManaCost).
 
-ItemDefinitions.MAX_MYTHIC_SLOTS = 2 -- slot 1 -> E, slot 2 -> R
-ItemDefinitions.SLOT_KEYS = { "E", "R", "RMB" } -- [3] = the separate boot slot
+ItemDefinitions.MAX_MYTHIC_SLOTS = 3 -- slot 1 -> E, slot 2 -> R, slot 3 -> SPACE
+ItemDefinitions.SLOT_KEYS = { "E", "R", "SPACE", "RMB" } -- [4] = the separate boot slot
 -- Boots live in their own slot (not a mythic slot), cast with the RIGHT MOUSE button.
-ItemDefinitions.BOOT_SLOT = 3
+ItemDefinitions.BOOT_SLOT = 4
 ItemDefinitions.BOOT_KEY = "M2" -- AbilityRequest slot name for the boot skill
 ItemDefinitions.SELL_RATIO = 0.5 -- mythics sell back for half price
 
@@ -210,7 +210,7 @@ ItemDefinitions.Abilities = {
 	-- Any class -------------------------------------------------------------------
 	SummonGolem = {
 		Id = "SummonGolem", Name = "Summon Golem", Targeting = "Point",
-		Cooldown = 40, Duration = 20, Range = 28, Radius = 9, Stun = 1.4, Damage = { AD = 1.2 },
+		Cooldown = 40, Duration = 20, Range = 28, Radius = 9, Stun = 1.4, Damage = { AD = 1.2, MP = 1.0 },
 		Color = Color3.fromRGB(150, 200, 120),
 		Summary = "Hurl a stone golem to the target point: it crashes down, damaging and stunning every enemy within 9 studs for 1.4 sec, then fights whatever you attack.",
 	},
@@ -353,10 +353,175 @@ ItemDefinitions.Abilities = {
 	},
 }
 
+----------------------------------------------------------------------------
+-- Class active items, set 2: five per class (E / R / SPACE), each built around the class's
+-- specialty. Value = the skill's gold value (see SKILL_VALUE); prices = stats + skill.
+----------------------------------------------------------------------------
+local CLASS_SKILLS_2 = {
+	-- Assassin: burst, execution, stealth, mobility ---------------------------------------
+	Assassinate = {
+		Id = "Assassinate", Name = "Assassinate", Targeting = "Unit", Value = 300,
+		Cooldown = 12, Damage = { AD = 2.6 }, Range = 18, ExecuteThreshold = 0.35, ExecuteBonus = 0.6, StealthAfter = 1.5,
+		Color = Color3.fromRGB(150, 60, 210),
+		Summary = "Select an enemy: vanish, appear behind it and stab - 60% more damage below 35% health - then stay hidden for 1.5 sec.",
+	},
+	VenomToxin = {
+		Id = "VenomToxin", Name = "Venom Toxin", Targeting = "Direction", Value = 300,
+		Cooldown = 9, Damage = { AD = 1.0 }, Range = 30, Speed = 90, PoisonPercent = 0.35, PoisonTicks = 4, Slow = 0.3, SlowDuration = 3,
+		Color = Color3.fromRGB(130, 220, 70),
+		Summary = "Throw a venom-coated blade: the first enemy hit takes damage, is poisoned for 4 sec (35% of the hit every second, ignores armor) and slowed by 30%.",
+	},
+	DeathMark = {
+		Id = "DeathMark", Name = "Death Mark", Targeting = "Unit", Value = 300,
+		Cooldown = 14, Damage = { AD = 1.2 }, Range = 24, Vulnerable = 0.2, Duration = 4,
+		Color = Color3.fromRGB(200, 40, 70),
+		Summary = "Brand an enemy with the reaper's mark: it takes damage and then 20% more damage from every source for 4 sec.",
+	},
+	RicochetBlade = {
+		Id = "RicochetBlade", Name = "Ricochet Blade", Targeting = "Unit", Value = 300,
+		Cooldown = 10, Damage = { AD = 1.3 }, Range = 26, Bounces = 3, BounceRange = 10, BounceFalloff = 0.15,
+		Color = Color3.fromRGB(180, 120, 255),
+		Summary = "Hurl the chakram at an enemy: it ricochets to up to 3 more nearby enemies, losing 15% damage per bounce.",
+	},
+	Evasion = {
+		Id = "Evasion", Name = "Evasion", Targeting = "Self", Value = 300,
+		Cooldown = 16, Duration = 2, Evade = true, HasteBonus = 0.3,
+		Color = Color3.fromRGB(150, 150, 230),
+		Summary = "Become a mirage for 2 sec: every basic attack against you misses and you move 30% faster.",
+	},
+	-- Mage: ranged magic, area control, mana ---------------------------------------------
+	ChainLightning = {
+		Id = "ChainLightning", Name = "Chain Lightning", Targeting = "Unit", Value = 350,
+		Cooldown = 10, ManaCost = 60, Damage = { MP = 1.8 }, TrueDamage = true, Range = 36, Chains = 3, ChainRange = 12, ChainFalloff = 0.2,
+		Color = Color3.fromRGB(120, 180, 255),
+		Summary = "Call lightning on an enemy: it arcs to up to 3 more enemies nearby, losing 20% damage per jump.",
+	},
+	Meteor = {
+		Id = "Meteor", Name = "Meteor", Targeting = "Point", Value = 350,
+		Cooldown = 14, ManaCost = 80, Damage = { MP = 3.4 }, TrueDamage = true, Range = 40, Radius = 8, Delay = 1.0, Stun = 0.6,
+		Color = Color3.fromRGB(255, 120, 40),
+		Summary = "Call down a meteor: after 1 sec it crashes into the target area, dealing heavy damage and stunning everyone inside.",
+	},
+	VoidRift = {
+		Id = "VoidRift", Name = "Void Rift", Targeting = "Point", Value = 350,
+		Cooldown = 15, ManaCost = 70, Damage = { MP = 0.6 }, TrueDamage = true, Range = 30, Radius = 7, Duration = 3, TickInterval = 0.5, Slow = 0.35, SlowDuration = 0.8,
+		Color = Color3.fromRGB(140, 70, 220),
+		Summary = "Tear open a rift for 3 sec: enemies inside are slowed by 35% and take damage every 0.5 sec (damage below is per tick).",
+	},
+	ManaAegis = {
+		Id = "ManaAegis", Name = "Arcane Aegis", Targeting = "Self", Value = 300,
+		Cooldown = 16, ManaCost = 60, Shield = { MP = 3.0, HP = 0.08 }, Duration = 3, Damage = { MP = 1.2 }, TrueDamage = true, ExplodeRadius = 7,
+		Color = Color3.fromRGB(90, 190, 255),
+		Summary = "Wrap yourself in runes: a shield for 3 sec, then the runes burst, damaging every enemy within 7 studs.",
+	},
+	TimeWarp = {
+		Id = "TimeWarp", Name = "Time Warp", Targeting = "Point", Value = 300,
+		Cooldown = 13, ManaCost = 60, Damage = { MP = 1.4 }, TrueDamage = true, Range = 28, Radius = 9, Slow = 0.5, SlowDuration = 2.5, HasteBonus = 0.2, HasteDuration = 2.5,
+		Color = Color3.fromRGB(230, 200, 110),
+		Summary = "Bend time in an area: enemies inside take damage and are slowed by 50% for 2.5 sec while you move 20% faster.",
+	},
+	-- Marksman: range, attack speed, kiting, zone control --------------------------------
+	Snipe = {
+		Id = "Snipe", Name = "Snipe", Targeting = "Direction", Value = 300,
+		Cooldown = 12, Damage = { AD = 5.0 }, Range = 90, Width = 1.5, Delay = 0.7,
+		Color = Color3.fromRGB(255, 220, 120),
+		Summary = "Take aim for 0.7 sec, then fire a bolt across the map: the first enemy in the line takes a critical hit.",
+	},
+	BearTrap = {
+		Id = "BearTrap", Name = "Bear Trap", Targeting = "Point", Value = 300,
+		Cooldown = 10, Damage = { AD = 1.5 }, Range = 20, Radius = 3, Stun = 1.5, TrapDuration = 20, MaxTraps = 2,
+		Color = Color3.fromRGB(190, 170, 120),
+		Summary = "Set a hidden bear trap (up to 2 at once, 20 sec each): the first enemy to step on it takes damage and is stuck for 1.5 sec.",
+	},
+	HuntersMark = {
+		Id = "HuntersMark", Name = "Hunter's Mark", Targeting = "Unit", Value = 300,
+		Cooldown = 16, Range = 45, Vulnerable = 0.25, Duration = 5, AttackSpeedBoost = 0.3,
+		Color = Color3.fromRGB(255, 200, 80),
+		Summary = "Mark an enemy for the hunt: it takes 25% more damage from every source for 5 sec and you attack 30% faster.",
+	},
+	Buckshot = {
+		Id = "Buckshot", Name = "Buckshot", Targeting = "Direction", Value = 300,
+		Cooldown = 10, Damage = { AD = 2.4 }, Range = 14, Arc = 60, KnockDistance = 5, Recoil = 6,
+		Color = Color3.fromRGB(230, 170, 90),
+		Summary = "Fire a spread of bolts point-blank: every enemy in the cone takes damage and is knocked back, and the recoil throws you 6 studs back.",
+	},
+	ArrowStorm = {
+		Id = "ArrowStorm", Name = "Arrow Storm", Targeting = "Self", Value = 300,
+		Cooldown = 15, Damage = { AD = 0.5 }, Duration = 3, Interval = 0.3, Range = 30,
+		Color = Color3.fromRGB(150, 230, 120),
+		Summary = "For 3 sec your quiver fires on its own: an arrow at the nearest enemy within 30 studs every 0.3 sec (damage below is per arrow).",
+	},
+	-- Tank: crowd control, taunts, protection, health scaling ----------------------------
+	ChainHook = {
+		Id = "ChainHook", Name = "Chain Hook", Targeting = "Direction", Value = 350,
+		Cooldown = 13, Damage = { AD = 1.0, HP = 0.03 }, Range = 22, Width = 2, Stun = 0.5,
+		Color = Color3.fromRGB(170, 170, 190),
+		Summary = "Throw a heavy chain: the first enemy it catches takes damage, is dragged to you and stunned for 0.5 sec.",
+	},
+	Challenge = {
+		Id = "Challenge", Name = "Challenge", Targeting = "Self", Value = 350,
+		Cooldown = 16, Radius = 10, Taunt = 1.5, Shield = { HP = 0.1 }, Duration = 3,
+		Color = Color3.fromRGB(240, 170, 70),
+		Summary = "Roar a challenge: enemy heroes within 10 studs are forced to attack you for 1.5 sec while you gain a shield.",
+	},
+	StoneForm = {
+		Id = "StoneForm", Name = "Stone Form", Targeting = "Self", Value = 300,
+		Cooldown = 18, Duration = 2.5, DamageReduction = 0.6, SelfSlow = 0.3,
+		Color = Color3.fromRGB(170, 160, 140),
+		Summary = "Turn to stone for 2.5 sec: take 60% less damage from everything, but move 30% slower.",
+	},
+	Fissure = {
+		Id = "Fissure", Name = "Fissure", Targeting = "Direction", Value = 350,
+		Cooldown = 13, Damage = { AD = 1.2, HP = 0.04 }, Range = 26, Width = 3, Stun = 1.0,
+		Color = Color3.fromRGB(190, 130, 70),
+		Summary = "Split the ground in a line: every enemy on the fissure takes damage and is stunned for 1 sec.",
+	},
+	Sanctuary = {
+		Id = "Sanctuary", Name = "Sanctuary", Targeting = "Self", Value = 300,
+		Cooldown = 20, Radius = 12, Heal = { HP = 0.1 }, Shield = { HP = 0.08 }, Duration = 3, AffectsAllies = true,
+		Color = Color3.fromRGB(255, 225, 140),
+		Summary = "Raise the totem: you and allies within 12 studs are healed and shielded (both scale with YOUR max health).",
+	},
+	-- Fighter: sustained melee, lifesteal, dives, executes -------------------------------
+	CrimsonCleave = {
+		Id = "CrimsonCleave", Name = "Crimson Cleave", Targeting = "Direction", Value = 300,
+		Cooldown = 9, Damage = { AD = 2.2 }, Range = 9, Arc = 150, LifestealPercent = 0.4,
+		Color = Color3.fromRGB(230, 40, 50),
+		Summary = "A huge blood-drinking cleave: every enemy in the arc takes damage and you heal for 40% of the damage dealt.",
+	},
+	RendingCharge = {
+		Id = "RendingCharge", Name = "Rending Charge", Targeting = "Direction", Value = 300,
+		Cooldown = 11, Damage = { AD = 1.8 }, Range = 18, Width = 3, Slow = 0.4, SlowDuration = 2,
+		Color = Color3.fromRGB(220, 110, 60),
+		Summary = "Charge forward and skewer the first enemy in your way: it takes damage and is slowed by 40% for 2 sec.",
+	},
+	BattleStandard = {
+		Id = "BattleStandard", Name = "Battle Standard", Targeting = "Self", Value = 300,
+		Cooldown = 20, Radius = 12, Duration = 6, HealPerSecond = 0.02, Slow = 0.2, AffectsAllies = true,
+		Color = Color3.fromRGB(230, 70, 60),
+		Summary = "Plant your banner for 6 sec: you and allies near it regenerate 2% max health per second; enemies near it are slowed by 20%.",
+	},
+	Guillotine = {
+		Id = "Guillotine", Name = "Guillotine", Targeting = "Direction", Value = 300,
+		Cooldown = 11, Damage = { AD = 3.2 }, Range = 10, Arc = 60, Delay = 0.4, MissingHealthBonus = 1.0,
+		Color = Color3.fromRGB(200, 50, 40),
+		Summary = "Raise the greataxe and bring it down after 0.4 sec: enemies in front take damage, +1% for every 1% health they are missing.",
+	},
+	LastStand = {
+		Id = "LastStand", Name = "Last Stand", Targeting = "Self", Value = 350,
+		Cooldown = 40, Duration = 3, Undying = true, Heal = { HP = 0.12 }, UsableWhileStunned = true,
+		Color = Color3.fromRGB(255, 80, 90),
+		Summary = "Refuse to die: for 3 sec your health cannot drop below 1, then you heal. Usable while stunned.",
+	},
+}
+for id, ability in pairs(CLASS_SKILLS_2) do
+	ItemDefinitions.Abilities[id] = ability
+end
+
 -- The summoned golem (used by SummonGolem; numbers shown in the tooltip).
 -- Its health and hit damage scale with the SUMMONER's stats at cast time.
 ItemDefinitions.Golem = {
-	MaxHealth = { HP = 1.0 }, Armor = 30, Damage = { AD = 1.1 }, AttackCooldown = 1.3, AttackRange = 6,
+	MaxHealth = { HP = 1.0 }, Armor = 30, Damage = { AD = 1.1, MP = 0.9 }, AttackCooldown = 1.3, AttackRange = 6,
 	AggroRange = 24, LeashRange = 45, MoveSpeed = 17, Lifetime = 20,
 	KillReward = 25, -- gold for the enemy hero who destroys it
 }
@@ -488,6 +653,58 @@ addItem({ Id = "GuardianGauntlets", Name = "Guardian Gauntlets", Class = "Tank",
 addItem({ Id = "WarDrums", Name = "War Drums", Class = "Fighter", Price = 840, Ability = "DrumsOfWar", Stats = { AttackSpeed = 0.25, MaxHealth = 100 },
 	Description = "A war drum whose beat drives the bearer into a fury.", Glyph = "WD", Color = Color3.fromRGB(160, 60, 50) })
 
+-- Class active items, set 2 (skills in CLASS_SKILLS_2 above) -----------------------------
+addItem({ Id = "NightfallDagger", Name = "Nightfall Dagger", Class = "Assassin", Price = 750, Ability = "Assassinate", Stats = { AttackDamage = 18 },
+	Description = "Forged at dusk; it only cuts from behind.", Glyph = "ND", Color = Color3.fromRGB(80, 40, 120) })
+addItem({ Id = "ViperFang", Name = "Viper's Kiss", Class = "Assassin", Price = 750, Ability = "VenomToxin", Stats = { AttackDamage = 12, AttackSpeed = 0.1 },
+	Description = "A slender throwing blade slick with viper venom.", Glyph = "VK", Color = Color3.fromRGB(90, 150, 60) })
+addItem({ Id = "ReapersSigil", Name = "Reaper's Sigil", Class = "Assassin", Price = 765, Ability = "DeathMark", Stats = { AttackDamage = 16, MoveSpeed = 1 },
+	Description = "A bone token that marks a soul for collection.", Glyph = "RS", Color = Color3.fromRGB(120, 30, 50) })
+addItem({ Id = "TwilightChakram", Name = "Twilight Chakram", Class = "Assassin", Price = 750, Ability = "RicochetBlade", Stats = { AttackDamage = 14, MoveSpeed = 1.5 },
+	Description = "A razor ring that never flies in a straight line.", Glyph = "TC", Color = Color3.fromRGB(130, 80, 190) })
+addItem({ Id = "MirageCloak", Name = "Mirage Cloak", Class = "Assassin", Price = 785, Ability = "Evasion", Stats = { AttackDamage = 10, MoveSpeed = 2, MaxHealth = 60 },
+	Description = "Blows leave only ripples in the air where you stood.", Glyph = "MC", Color = Color3.fromRGB(90, 90, 150) })
+addItem({ Id = "StormcallerRod", Name = "Stormcaller Rod", Class = "Mage", Price = 845, Ability = "ChainLightning", Stats = { MagicPower = 18, MaxHealth = 80 },
+	Description = "Thunder answers when it is raised.", Glyph = "SR", Color = Color3.fromRGB(90, 150, 255) })
+addItem({ Id = "MeteorCodex", Name = "Meteor Codex", Class = "Mage", Price = 790, Ability = "Meteor", Stats = { MagicPower = 22 },
+	Description = "Its last page is a map of the falling stars.", Glyph = "MX", Color = Color3.fromRGB(230, 110, 40) })
+addItem({ Id = "VoidPrism", Name = "Void Prism", Class = "Mage", Price = 835, Ability = "VoidRift", Stats = { MagicPower = 16, MaxHealth = 100 },
+	Description = "Look through it and something looks back.", Glyph = "VP", Color = Color3.fromRGB(110, 60, 170) })
+addItem({ Id = "RunewardAmulet", Name = "Runeward Amulet", Class = "Mage", Price = 790, Ability = "ManaAegis", Stats = { MagicPower = 12, MaxHealth = 150 },
+	Description = "Runes that drink magic and spit it back out.", Glyph = "RA", Color = Color3.fromRGB(80, 170, 230) })
+addItem({ Id = "ChronoHourglass", Name = "Chrono Hourglass", Class = "Mage", Price = 845, Ability = "TimeWarp", Stats = { MagicPower = 14, MoveSpeed = 2, MaxHealth = 80 },
+	Description = "The sand inside falls upward.", Glyph = "CH", Color = Color3.fromRGB(210, 180, 90) })
+addItem({ Id = "HawkeyeArbalest", Name = "Hawkeye Arbalest", Class = "Marksman", Price = 750, Ability = "Snipe", Stats = { AttackDamage = 18 },
+	Description = "Heavy, slow to span, and never misses twice.", Glyph = "HA", Color = Color3.fromRGB(150, 120, 70) })
+addItem({ Id = "TrappersKit", Name = "Trapper's Kit", Class = "Marksman", Price = 730, Ability = "BearTrap", Stats = { AttackDamage = 10, AttackSpeed = 0.12 },
+	Description = "Iron jaws, oiled springs, and patience.", Glyph = "TK", Color = Color3.fromRGB(120, 110, 90) })
+addItem({ Id = "StalkersSpyglass", Name = "Stalker's Spyglass", Class = "Marksman", Price = 825, Ability = "HuntersMark", Stats = { AttackDamage = 12, AttackSpeed = 0.15 },
+	Description = "Once seen through this lens, a quarry has nowhere to hide.", Glyph = "SS", Color = Color3.fromRGB(200, 170, 80) })
+addItem({ Id = "ScatterCrossbow", Name = "Scatter Crossbow", Class = "Marksman", Price = 765, Ability = "Buckshot", Stats = { AttackDamage = 16, MoveSpeed = 1 },
+	Description = "Six bolts, one trigger, point-blank.", Glyph = "SC", Color = Color3.fromRGB(140, 100, 60) })
+addItem({ Id = "StormstringQuiver", Name = "Stormstring Quiver", Class = "Marksman", Price = 800, Ability = "ArrowStorm", Stats = { AttackSpeed = 0.2, AttackDamage = 8 },
+	Description = "The arrows nock themselves.", Glyph = "SQ", Color = Color3.fromRGB(120, 200, 110) })
+addItem({ Id = "TitansChain", Name = "Titan's Chain", Class = "Tank", Price = 885, Ability = "ChainHook", Stats = { MaxHealth = 200, Armor = 12 },
+	Description = "Each link is the weight of a man.", Glyph = "TN", Color = Color3.fromRGB(110, 110, 125) })
+addItem({ Id = "BellowingHelm", Name = "Bellowing Helm", Class = "Tank", Price = 765, Ability = "Challenge", Stats = { MaxHealth = 250 },
+	Description = "Its roar makes enemies forget everyone else.", Glyph = "BH", Color = Color3.fromRGB(170, 120, 60) })
+addItem({ Id = "StoneskinIdol", Name = "Stoneskin Idol", Class = "Tank", Price = 765, Ability = "StoneForm", Stats = { Armor = 18, MaxHealth = 100 },
+	Description = "A little granite god that lends you its skin.", Glyph = "SI", Color = Color3.fromRGB(130, 125, 115) })
+addItem({ Id = "EarthsplitterMaul", Name = "Earthsplitter Maul", Class = "Tank", Price = 800, Ability = "Fissure", Stats = { MaxHealth = 150, Armor = 12 },
+	Description = "Swung down, it opens the ground in a line.", Glyph = "EM", Color = Color3.fromRGB(140, 100, 60) })
+addItem({ Id = "SanctuaryTotem", Name = "Sanctuary Totem", Class = "Tank", Price = 785, Ability = "Sanctuary", Stats = { MaxHealth = 200, Armor = 9 },
+	Description = "Carved with the names of everyone it has saved.", Glyph = "ST", Color = Color3.fromRGB(230, 200, 120) })
+addItem({ Id = "Bloodthirster", Name = "Bloodthirster", Class = "Fighter", Price = 750, Ability = "CrimsonCleave", Stats = { AttackDamage = 18 },
+	Description = "The blade drinks, and so do you.", Glyph = "BT", Color = Color3.fromRGB(180, 30, 40) })
+addItem({ Id = "RavagersSpear", Name = "Ravager's Spear", Class = "Fighter", Price = 800, Ability = "RendingCharge", Stats = { AttackDamage = 12, MaxHealth = 120 },
+	Description = "Barbed so the charge ends in the enemy.", Glyph = "RV", Color = Color3.fromRGB(160, 80, 50) })
+addItem({ Id = "WarlordsBanner", Name = "Warlord's Banner", Class = "Fighter", Price = 800, Ability = "BattleStandard", Stats = { MaxHealth = 150, AttackDamage = 10 },
+	Description = "Where it is planted, no one retreats.", Glyph = "WB", Color = Color3.fromRGB(200, 60, 50) })
+addItem({ Id = "ExecutionersGreataxe", Name = "Executioner's Greataxe", Class = "Fighter", Price = 800, Ability = "Guillotine", Stats = { AttackDamage = 20 },
+	Description = "Heavier the closer the end is.", Glyph = "EG", Color = Color3.fromRGB(110, 40, 40) })
+addItem({ Id = "UndyingHeart", Name = "Heart of the Undying", Class = "Fighter", Price = 850, Ability = "LastStand", Stats = { MaxHealth = 180, AttackDamage = 8 },
+	Description = "It keeps beating after yours would stop.", Glyph = "HU", Color = Color3.fromRGB(200, 50, 70) })
+
 -- Class boots: 5 per class, one of each kind (the first pair of each class is defined above).
 -- Price = stat gold + skill gold (ability.Value or SKILL_VALUE), each within 10g.
 -- Icon = "" -> the shop / HUD show the 2-letter Glyph until real icons are uploaded.
@@ -552,11 +769,11 @@ end
 ItemDefinitions.Roles = { "General", "Assassin", "Mage", "Marksman", "Tank", "Fighter" }
 ItemDefinitions.RoleItems = {
 	General = { "WarlordsCleaver", "AegisOfDawn", "PhantomCloak", "GolemHeart", "SwiftBlade" },
-	Assassin = { "AssassinBoots", "VenomFang", "SmokeBomb", "ShadowBlades" },
-	Mage = { "MageBoots", "EmberStaff", "FrostTome", "ArcaneOrb" },
-	Marksman = { "RangerBoots", "HuntersLongbow", "Quickbow" },
-	Tank = { "TankBoots", "BastionShield", "WarHorn", "GuardianGauntlets" },
-	Fighter = { "FighterBoots", "BerserkerAxe", "TitanGauntlets", "WarDrums" },
+	Assassin = { "AssassinBoots", "VenomFang", "SmokeBomb", "ShadowBlades", "NightfallDagger", "ViperFang", "ReapersSigil", "TwilightChakram", "MirageCloak" },
+	Mage = { "MageBoots", "EmberStaff", "FrostTome", "ArcaneOrb", "StormcallerRod", "MeteorCodex", "VoidPrism", "RunewardAmulet", "ChronoHourglass" },
+	Marksman = { "RangerBoots", "HuntersLongbow", "Quickbow", "HawkeyeArbalest", "TrappersKit", "StalkersSpyglass", "ScatterCrossbow", "StormstringQuiver" },
+	Tank = { "TankBoots", "BastionShield", "WarHorn", "GuardianGauntlets", "TitansChain", "BellowingHelm", "StoneskinIdol", "EarthsplitterMaul", "SanctuaryTotem" },
+	Fighter = { "FighterBoots", "BerserkerAxe", "TitanGauntlets", "WarDrums", "Bloodthirster", "RavagersSpear", "WarlordsBanner", "ExecutionersGreataxe", "UndyingHeart" },
 }
 -- Boots per class, one of each kind, in the order of BootTypes (shown in the shop's BOOTS section)
 ItemDefinitions.BootTypes = { "Crowd Control", "Attack Speed", "Movement", "Damage", "Mobility" }
@@ -580,8 +797,8 @@ ItemDefinitions.RoleBoots = {
 -- server combat code from item.Passive (see CombatService.GetEquippedPassives).
 ----------------------------------------------------------------------------
 ItemDefinitions.MAX_PASSIVE_SLOTS = 3
--- Sell / slot index of passive slot N is PASSIVE_SLOT_BASE + N (4, 5, 6): after E (1), R (2), boots (3)
-ItemDefinitions.PASSIVE_SLOT_BASE = 3
+-- Sell / slot index of passive slot N is PASSIVE_SLOT_BASE + N (5, 6, 7): after E (1), R (2), SPACE (3), boots (4)
+ItemDefinitions.PASSIVE_SLOT_BASE = 4
 ItemDefinitions.RolePassives = { General = {}, Assassin = {}, Mage = {}, Marksman = {}, Tank = {}, Fighter = {} }
 
 function ItemDefinitions.AddPassive(item)
@@ -986,7 +1203,7 @@ function ItemDefinitions.GetShortEffect(item)
 	if not ability then
 		return ""
 	end
-	return string.format("%s (%s)", ability.Name, item.SlotType == "Boots" and "Right Mouse" or "E/R")
+	return string.format("%s (%s)", ability.Name, item.SlotType == "Boots" and "Right Mouse" or "SPACE/E/R")
 end
 
 function ItemDefinitions.GetShortSummary(item)
@@ -1035,7 +1252,24 @@ function ItemDefinitions.GetAbilityStatLines(ability, stats)
 	if ability.Arrows then add("Arrows", string.format("%d (damage above is per arrow)", ability.Arrows)) end
 	if ability.SlowRadius then add("Slow radius", ability.SlowRadius .. " studs (enemies)") end
 	if ability.ReflectPercent then add("Reflect", string.format("%d%% of damage taken", math.floor(ability.ReflectPercent * 100 + 0.5))) end
-	if ability.Shield then add("Shield", AbilityScaling.DescribeWithValue(ability.Shield, stats) .. (ability.Radius and " (you + allies)" or "")) end
+	if ability.Shield then add("Shield", AbilityScaling.DescribeWithValue(ability.Shield, stats) .. ((ability.Id == "RallyingHorn" or ability.AffectsAllies) and " (you + allies)" or "")) end
+	if ability.PoisonPercent then add("Poison", string.format("%d%% of the hit per sec for %d sec (ignores armor)", ability.PoisonPercent * 100, ability.PoisonTicks or 0)) end
+	if ability.Vulnerable then add("Vulnerable", string.format("+%d%% damage taken for %.1f sec", ability.Vulnerable * 100, ability.Duration or 0)) end
+	if ability.Bounces then add("Bounces", string.format("%d more enemies within %d studs (-%d%% each)", ability.Bounces, ability.BounceRange or 0, (ability.BounceFalloff or 0) * 100)) end
+	if ability.Chains then add("Chains", string.format("%d more enemies within %d studs (-%d%% each)", ability.Chains, ability.ChainRange or 0, (ability.ChainFalloff or 0) * 100)) end
+	if ability.Evade then add("Evade", "every basic attack against you misses") end
+	if ability.TickInterval then add("Ticks", string.format("every %.1f sec (damage above is per tick)", ability.TickInterval)) end
+	if ability.ExplodeRadius then add("Rune burst", string.format("when the shield ends: damage above to enemies within %d studs", ability.ExplodeRadius)) end
+	if ability.TrapDuration then add("Traps", string.format("up to %d at once, each lasts %d sec", ability.MaxTraps or 1, ability.TrapDuration)) end
+	if ability.Recoil then add("Recoil", string.format("you jump %d studs back", ability.Recoil)) end
+	if ability.Taunt then add("Taunt", string.format("%.1f sec (enemy heroes)", ability.Taunt)) end
+	if ability.DamageReduction then add("Damage taken", string.format("-%d%%", ability.DamageReduction * 100)) end
+	if ability.SelfSlow then add("Self slow", string.format("-%d%% move speed", ability.SelfSlow * 100)) end
+	if ability.LifestealPercent then add("Heal", string.format("%d%% of the damage dealt", ability.LifestealPercent * 100)) end
+	if ability.HealPerSecond then add("Regeneration", string.format("%d%% max health per sec", ability.HealPerSecond * 100)) end
+	if ability.MissingHealthBonus then add("Execute", "+1% damage per 1% missing health") end
+	if ability.Undying then add("Undying", "health cannot drop below 1") end
+	if ability.StealthAfter then add("Stealth", string.format("%.1f sec after the strike", ability.StealthAfter)) end
 	if ability.Empower then add("Next attack", string.format("+%d%% damage", (ability.Empower - 1) * 100)) end
 	if ability.BlindsEnemies then add("Smoke", "enemies inside miss basic attacks") end
 	if ability.AttackSpeedBoost then add("Attack speed", string.format("+%d%% for %.1f sec", ability.AttackSpeedBoost * 100, ability.Duration)) end

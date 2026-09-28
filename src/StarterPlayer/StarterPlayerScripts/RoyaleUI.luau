@@ -127,7 +127,7 @@ function RoyaleUI.new(screen, clientState)
 	Label({ Text = "YOUR GEAR", Font = FONTS.Title, TextSize = 16, TextColor3 = COLORS.Gold, Position = UDim2.fromOffset(12, 8), Size = UDim2.new(1, -24, 0, 20), ZIndex = 7, Parent = gear })
 	self.GearRows = {}
 	local slots = {
-		{ Key = "Weapon", Label = "WPN" }, { Key = 1, Label = "E" }, { Key = 2, Label = "R" }, { Key = BOOT_SLOT, Label = "RMB" },
+		{ Key = "Weapon", Label = "WPN" }, { Key = 1, Label = "E" }, { Key = 2, Label = "R" }, { Key = 3, Label = "SPC" }, { Key = BOOT_SLOT, Label = "RMB" },
 		{ Key = PASSIVE_BASE + 1, Label = "P1" }, { Key = PASSIVE_BASE + 2, Label = "P2" }, { Key = PASSIVE_BASE + 3, Label = "P3" },
 		{ Key = "Cross", Label = "\u{271D}" },
 	}
@@ -497,7 +497,7 @@ function RoyaleUI:ShowChest(payload)
 			Label({ Text = entry.Kind == "Potion" and "+" or string.sub(entry.Name, 1, 1), Font = FONTS.Title, TextSize = 22, TextXAlignment = Enum.TextXAlignment.Center, Size = UDim2.fromScale(1, 1), ZIndex = 24, Parent = icon })
 		end
 		-- where it will go when taken
-		local slot = entry.Slot == "Weapon" and "WEAPON + Q" or entry.Slot == "Boots" and "M2" or entry.Slot == "Passive" and "PASSIVE" or entry.Slot == "Potion" and "POTION" or "E / R"
+		local slot = entry.Slot == "Weapon" and "WEAPON + Q" or entry.Slot == "Boots" and "M2" or entry.Slot == "Passive" and "PASSIVE" or entry.Slot == "Potion" and "POTION" or "E / R / SPACE"
 		Label({ Text = entry.Name, Font = FONTS.Bold, TextSize = 14, TextColor3 = entry.Color or COLORS.Text, Position = UDim2.fromOffset(52, 5), Size = UDim2.new(1, -140, 0, 18), TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 23, Parent = row })
 		local slotTag = Label({ Text = slot, Font = FONTS.Title, TextSize = 12, TextColor3 = Color3.fromRGB(30, 20, 10), BackgroundColor3 = COLORS.Gold, BackgroundTransparency = 0.1, TextXAlignment = Enum.TextXAlignment.Center, AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -6, 0, 5), Size = UDim2.fromOffset(78, 17), ZIndex = 23, Parent = row })
 		UITheme.Corner(slotTag, 4)

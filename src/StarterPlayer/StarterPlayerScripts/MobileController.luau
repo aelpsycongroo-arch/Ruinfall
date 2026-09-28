@@ -122,7 +122,7 @@ end
 
 -- Resolves what Q/E/R currently do (E/R read the equipped mythic slots).
 -- skill buttons: Q (class), E / R (mythic slots), M2 (boot slot = right mouse on desktop)
-local SKILL_KEYS = { "Q", "E", "R", "M2" }
+local SKILL_KEYS = { "Q", "E", "R", "SPACE", "M2" }
 
 local function getSlotInfo(key)
 	local me = ClientState.GetMe()
@@ -290,7 +290,7 @@ local function buildGui()
 	buttons.Attack = attack
 
 	-- Q / E / R arc around the attack button
-	local offsets = { Q = Vector2.new(-122, 12), E = Vector2.new(-96, -88), R = Vector2.new(-10, -124), M2 = Vector2.new(-192, -40) }
+	local offsets = { Q = Vector2.new(-122, 12), E = Vector2.new(-96, -88), R = Vector2.new(-10, -124), SPACE = Vector2.new(-196, -110), M2 = Vector2.new(-192, -40) }
 	for _, key in ipairs(SKILL_KEYS) do
 		local entry = roundButton(key, key == "M2" and 62 or 72, attackCenter + offsets[key], cluster)
 		if key == "Q" then
@@ -300,20 +300,20 @@ local function buildGui()
 			entry.IconView = UITheme.ItemIcon({ Name = "ItemIcon", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.44), Size = UDim2.fromOffset(40, 40), ZIndex = 2, Parent = entry.Frame })
 		end
 		entry.Name = Label({ Name = "AbilityName", Text = "", Font = FONTS.Bold, TextSize = 9, TextColor3 = MEDIEVAL.Parchment, TextStrokeTransparency = 0.3, TextXAlignment = Enum.TextXAlignment.Center, TextTruncate = Enum.TextTruncate.AtEnd, AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 1, 6), Size = UDim2.fromOffset(92, 12), ZIndex = 3, Parent = entry.Frame })
-		keyTag(entry, key == "M2" and "BT" or key)
+		keyTag(entry, key == "M2" and "BT" or key == "SPACE" and "SP" or key)
 		entry.Key = key
 		buttons[key] = entry
 	end
 
 	-- utility buttons
-	local swap = roundButton("Swap", 40, attackCenter + Vector2.new(-150, -150), cluster)
+	local swap = roundButton("Swap", 40, attackCenter + Vector2.new(-138, -168), cluster)
 	Label({ Text = "SWAP", Font = FONTS.Title, TextSize = 10, TextColor3 = MEDIEVAL.TrimBright, TextXAlignment = Enum.TextXAlignment.Center, Size = UDim2.fromScale(1, 1), ZIndex = 2, Parent = swap.Frame })
 	buttons.Swap = swap
 	local shop = roundButton("Shop", 52, attackCenter + Vector2.new(-218, 44), cluster)
 	shop.Frame.BackgroundColor3 = Color3.fromRGB(120, 88, 30)
 	shop.Caption = Label({ Text = "SHOP", Font = FONTS.Title, TextSize = 12, TextColor3 = MEDIEVAL.TrimBright, TextXAlignment = Enum.TextXAlignment.Center, Size = UDim2.fromScale(1, 1), ZIndex = 2, Parent = shop.Frame })
 	buttons.Shop = shop
-	local cancel = roundButton("Cancel", 60, attackCenter + Vector2.new(-212, -118), cluster)
+	local cancel = roundButton("Cancel", 60, attackCenter + Vector2.new(-40, -205), cluster)
 	cancel.Frame.BackgroundColor3 = Color3.fromRGB(110, 25, 25)
 	cancel.Frame.Visible = false
 	Label({ Text = "CANCEL", Font = FONTS.Title, TextSize = 11, TextColor3 = Color3.fromRGB(255, 220, 210), TextXAlignment = Enum.TextXAlignment.Center, Size = UDim2.fromScale(1, 1), ZIndex = 2, Parent = cancel.Frame })
@@ -327,7 +327,7 @@ local function beginAim(key, input)
 		if key == "M2" then
 			ClientState.LocalMessage:Fire("Boot slot is empty - tap SHOP to buy boots", "Info")
 		else
-			ClientState.LocalMessage:Fire(string.format("%s: mythic slot %d is empty - tap SHOP to buy a Mythic item", key, key == "E" and 1 or 2), "Info")
+			ClientState.LocalMessage:Fire(string.format("%s: mythic slot %d is empty - tap SHOP to buy a Mythic item", key, key == "E" and 1 or key == "R" and 2 or 3), "Info")
 		end
 		return
 	end

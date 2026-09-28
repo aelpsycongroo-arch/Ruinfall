@@ -162,7 +162,10 @@ local function buildCreepModel(position, lookAt, teamColor, name, maxHealth)
 	return model, root, humanoid
 end
 
--- Stone golem summoned by the Golem Heart mythic: mossy boulders, glowing team-coloured eyes/core.
+-- Stone golem summoned by the Golem Heart mythic. A jointed rig (Motor6D: Waist, Neck,
+-- shoulders, elbows, hips, knees) so GolemAnimationController can animate it: a hulking
+-- boulder body with a glowing rune core, crystal spine, mossy shoulders and huge fists.
+-- Coordinates are relative to the root (X right, Y up, -Z forward).
 local function buildGolemModel(position, lookAt, teamColor, name, maxHealth)
 	local hipHeight = 2.4
 	local model = Instance.new("Model")
@@ -175,26 +178,104 @@ local function buildGolemModel(position, lookAt, teamColor, name, maxHealth)
 	local y = position.Y + hipHeight + 1.7
 	root.CFrame = CFrame.lookAt(Vector3.new(position.X, y, position.Z), Vector3.new(lookAt.X, y, lookAt.Z))
 	root.Parent = model
-	local stone = Color3.fromRGB(112, 108, 100)
-	local darkStone = Color3.fromRGB(78, 76, 72)
-	local moss = Color3.fromRGB(74, 104, 58)
-	local glow = teamColor:Lerp(Color3.new(1, 1, 1), 0.25)
-	weld(model, root, "Part", { Name = "Torso", Size = Vector3.new(3.4, 3, 2.6), Color = stone, Material = Enum.Material.Slate }, CFrame.new(0, 0.2, 0) * CFrame.Angles(0, 0, math.rad(3)))
-	weld(model, root, "Part", { Name = "Moss", Size = Vector3.new(3.5, 0.5, 2.7), Color = moss, Material = Enum.Material.Grass }, CFrame.new(0, 1.75, 0))
-	weld(model, root, "Part", { Name = "Core", Shape = Enum.PartType.Ball, Size = Vector3.new(0.9, 0.9, 0.9), Color = glow, Material = Enum.Material.Neon }, CFrame.new(0, 0.3, -1.2))
-	weld(model, root, "Part", { Name = "Head", Size = Vector3.new(1.6, 1.2, 1.5), Color = darkStone, Material = Enum.Material.Slate }, CFrame.new(0, 2.3, -0.3))
-	for _, side in ipairs({ -1, 1 }) do
-		weld(model, root, "Part", { Name = "Eye", Size = Vector3.new(0.3, 0.18, 0.1), Color = glow, Material = Enum.Material.Neon }, CFrame.new(side * 0.35, 2.4, -1.06))
-		weld(model, root, "Part", { Name = "Shoulder", Size = Vector3.new(1.4, 1.2, 1.5), Color = darkStone, Material = Enum.Material.Slate }, CFrame.new(side * 2.2, 1.1, 0) * CFrame.Angles(0, 0, math.rad(side * -12)))
-		weld(model, root, "Part", { Name = "Arm", Size = Vector3.new(1.1, 2.6, 1.1), Color = stone, Material = Enum.Material.Slate }, CFrame.new(side * 2.35, -0.6, -0.1))
-		weld(model, root, "Part", { Name = "Fist", Size = Vector3.new(1.5, 1.3, 1.5), Color = darkStone, Material = Enum.Material.Slate }, CFrame.new(side * 2.4, -2.3, -0.2))
-		weld(model, root, "Part", { Name = "Leg", Size = Vector3.new(1.2, 2.4, 1.3), Color = darkStone, Material = Enum.Material.Slate }, CFrame.new(side * 0.85, -2.8, 0))
+	local stone = Color3.fromRGB(118, 112, 104)
+	local darkStone = Color3.fromRGB(76, 73, 70)
+	local moss = Color3.fromRGB(78, 110, 58)
+	local glow = teamColor:Lerp(Color3.new(1, 1, 1), 0.3)
+
+	local function piece(parent, props, offset)
+		local part = Instance.new(props.ClassName or "Part")
+		props.ClassName = nil
+		for key, value in pairs(props) do
+			part[key] = value
+		end
+		part.CanCollide = false
+		part.CanQuery = false
+		part.CanTouch = false
+		part.Massless = true
+		part.CastShadow = props.Material ~= Enum.Material.Neon
+		part.CFrame = root.CFrame * offset
+		part.Parent = model
+		if parent then -- decoration: welded to its limb so it follows the animation
+			local weldConstraint = Instance.new("WeldConstraint")
+			weldConstraint.Part0 = parent
+			weldConstraint.Part1 = part
+			weldConstraint.Parent = part
+		end
+		return part
+	end
+	local function joint(name, part0, part1, pivot)
+		local motor = Instance.new("Motor6D")
+		motor.Name = name
+		local pivotWorld = root.CFrame * pivot
+		motor.C0 = part0.CFrame:ToObjectSpace(pivotWorld)
+		motor.C1 = part1.CFrame:ToObjectSpace(pivotWorld)
+		motor.Part0 = part0
+		motor.Part1 = part1
+		motor.Parent = part1
+		return motor
+	end
+	local function rock(parent, size, offset, color, material)
+		return piece(parent, { Name = "Rock", Size = size, Color = color or darkStone, Material = material or Enum.Material.Slate }, offset)
+	end
+	local function neon(parent, name, size, offset, shape)
+		return piece(parent, { Name = name, Size = size, Color = glow, Material = Enum.Material.Neon, Shape = shape or Enum.PartType.Block }, offset)
+	end
+
+	-- torso: a big boulder chest, heavy belly stone, moss mantle, rune core and a crystal spine
+	local torso = piece(nil, { Name = "Torso", Size = Vector3.new(4.2, 3.2, 3.0), Color = stone, Material = Enum.Material.Slate }, CFrame.new(0, 0.9, 0) * CFrame.Angles(math.rad(-6), 0, 0))
+	joint("Waist", root, torso, CFrame.new(0, -0.6, 0))
+	rock(torso, Vector3.new(3.4, 1.5, 2.6), CFrame.new(0, -0.9, -0.1) * CFrame.Angles(0, 0, math.rad(4)), darkStone)
+	rock(torso, Vector3.new(1.9, 1.3, 0.8), CFrame.new(-0.95, 1.35, -1.35) * CFrame.Angles(math.rad(12), 0, math.rad(-6)), stone, Enum.Material.Rock)
+	rock(torso, Vector3.new(1.9, 1.3, 0.8), CFrame.new(0.95, 1.35, -1.35) * CFrame.Angles(math.rad(12), 0, math.rad(6)), stone, Enum.Material.Rock)
+	piece(torso, { Name = "Moss", Size = Vector3.new(4.0, 0.45, 2.8), Color = moss, Material = Enum.Material.Grass }, CFrame.new(0, 2.5, 0.15) * CFrame.Angles(math.rad(-6), 0, 0))
+	local core = neon(torso, "Core", Vector3.new(1.2, 1.2, 1.2), CFrame.new(0, 0.85, -1.5), Enum.PartType.Ball)
+	rock(torso, Vector3.new(1.8, 0.35, 0.5), CFrame.new(0, 1.55, -1.55), darkStone) -- brow of the core socket
+	for index, spec in ipairs({ { -0.9, 0.3, 30 }, { 0.8, 0.9, -25 }, { 0.2, 2.1, 10 }, { -1.2, -0.5, 40 } }) do
+		neon(torso, "RuneCrack", Vector3.new(0.14, 0.9 + index * 0.1, 0.1), CFrame.new(spec[1], spec[2], -1.52) * CFrame.Angles(0, 0, math.rad(spec[3])))
+	end
+	for index, spec in ipairs({ { -0.7, 2.5, 25 }, { 0.3, 2.8, -10 }, { 1.0, 2.3, -30 }, { -0.1, 1.8, 5 } }) do
+		neon(torso, "SpineCrystal", Vector3.new(0.55, 1.6 + index * 0.2, 0.55), CFrame.new(spec[1], spec[2], 1.25) * CFrame.Angles(math.rad(-35), 0, math.rad(spec[3])))
 	end
 	local light = Instance.new("PointLight")
 	light.Color = glow
-	light.Range = 8
-	light.Brightness = 1.2
-	light.Parent = root
+	light.Range = 10
+	light.Brightness = 1.6
+	light.Parent = core
+
+	-- head: a small heavy-browed rock sunk between the shoulders
+	local head = piece(nil, { Name = "Head", Size = Vector3.new(1.8, 1.4, 1.7), Color = darkStone, Material = Enum.Material.Slate }, CFrame.new(0, 3.0, -0.8))
+	joint("Neck", torso, head, CFrame.new(0, 2.4, -0.6))
+	rock(head, Vector3.new(2.1, 0.45, 0.6), CFrame.new(0, 3.4, -1.55) * CFrame.Angles(math.rad(-10), 0, 0), stone)
+	rock(head, Vector3.new(1.5, 0.5, 1.1), CFrame.new(0, 2.35, -1.0), darkStone) -- jaw
+	for _, side in ipairs({ -1, 1 }) do
+		neon(head, "Eye", Vector3.new(0.38, 0.2, 0.1), CFrame.new(side * 0.42, 3.08, -1.66))
+		piece(head, { Name = "Moss", Size = Vector3.new(0.7, 0.25, 0.8), Color = moss, Material = Enum.Material.Grass }, CFrame.new(side * 0.5, 3.72, -0.6))
+	end
+
+	-- arms: boulder shoulders, thick upper arms, forearms ending in huge knuckled fists
+	for _, side in ipairs({ -1, 1 }) do
+		local prefix = side > 0 and "R" or "L"
+		local upper = piece(nil, { Name = prefix .. "UpperArm", Size = Vector3.new(1.3, 2.1, 1.3), Color = stone, Material = Enum.Material.Slate }, CFrame.new(side * 2.85, 0.75, 0) * CFrame.Angles(0, 0, math.rad(side * 6)))
+		joint(prefix .. "_Shoulder", torso, upper, CFrame.new(side * 2.5, 1.7, 0))
+		rock(upper, Vector3.new(2.0, 1.7, 2.0), CFrame.new(side * 2.75, 1.9, 0.05) * CFrame.Angles(math.rad(8), 0, math.rad(side * -14)), darkStone)
+		piece(upper, { Name = "Moss", Size = Vector3.new(1.9, 0.35, 1.8), Color = moss, Material = Enum.Material.Grass }, CFrame.new(side * 2.8, 2.78, 0.05) * CFrame.Angles(0, 0, math.rad(side * -14)))
+		neon(upper, "ShoulderCrystal", Vector3.new(0.4, 1.1, 0.4), CFrame.new(side * 3.2, 2.8, 0.4) * CFrame.Angles(math.rad(-20), 0, math.rad(side * -35)))
+		local fore = piece(nil, { Name = prefix .. "Forearm", Size = Vector3.new(1.5, 1.9, 1.5), Color = stone, Material = Enum.Material.Slate }, CFrame.new(side * 2.95, -1.2, -0.1))
+		joint(prefix .. "_Elbow", upper, fore, CFrame.new(side * 2.9, -0.3, 0))
+		local fist = rock(fore, Vector3.new(2.0, 1.7, 2.0), CFrame.new(side * 3.0, -2.6, -0.25), darkStone)
+		fist.Name = prefix .. "Fist"
+		for knuckle = -1, 1 do
+			rock(fore, Vector3.new(0.5, 0.5, 0.55), CFrame.new(side * 3.0 + knuckle * 0.6, -2.3, -1.3), stone, Enum.Material.Rock)
+		end
+		neon(fore, "Rune", Vector3.new(0.12, 1.1, 0.1), CFrame.new(side * 2.95, -1.1, -0.78))
+		-- legs: stubby pillars with wide feet
+		local thigh = piece(nil, { Name = prefix .. "Thigh", Size = Vector3.new(1.6, 1.7, 1.7), Color = darkStone, Material = Enum.Material.Slate }, CFrame.new(side * 1.05, -1.8, 0))
+		joint(prefix .. "_Hip", root, thigh, CFrame.new(side * 1.0, -1.0, 0))
+		local shin = piece(nil, { Name = prefix .. "Shin", Size = Vector3.new(1.45, 1.2, 1.55), Color = stone, Material = Enum.Material.Slate }, CFrame.new(side * 1.05, -3.15, 0))
+		joint(prefix .. "_Knee", thigh, shin, CFrame.new(side * 1.05, -2.6, 0))
+		rock(shin, Vector3.new(1.9, 0.6, 2.3), CFrame.new(side * 1.1, -3.8, -0.3), darkStone)
+	end
 
 	local humanoid = Instance.new("Humanoid")
 	humanoid.RigType = Enum.HumanoidRigType.R15
@@ -214,8 +295,10 @@ local function buildGolemModel(position, lookAt, teamColor, name, maxHealth)
 	humanoid.Parent = model
 	model.PrimaryPart = root
 	model:SetAttribute("IsGolem", true)
+	model:SetAttribute("Rig", "Golem")
+	model:SetAttribute("SpawnedAt", workspace:GetServerTimeNow())
 	model:SetAttribute("BarWidth", 90)
-	model:SetAttribute("BarOffset", 5.2)
+	model:SetAttribute("BarOffset", 5.6)
 	return model, root, humanoid
 end
 
@@ -387,8 +470,18 @@ local function thinkGolem(golem, now)
 			if now - golem.LastAttackAt >= GOLEM.AttackCooldown then
 				golem.LastAttackAt = now
 				golem.Model:SetAttribute("LastAttackAt", now)
-				Net.Effect("Shockwave", { Position = targetPosition, Radius = 3, Color = Color3.fromRGB(150, 140, 120) })
-				CombatService.ApplyDamage(golem, target, golem.HitDamage, { BasicAttack = true })
+				golem.Model:SetAttribute("AttackSeq", (golem.Model:GetAttribute("AttackSeq") or 0) + 1)
+				-- the fists land 0.3 sec into the smash animation
+				local victim = target
+				task.delay(0.3, function()
+					if not golem.Alive or not victim.Alive or not CombatService.Active then
+						return
+					end
+					local impact = CombatService.GetPosition(victim)
+					Net.Effect("Shockwave", { Position = impact, Radius = 3.5, Color = Color3.fromRGB(150, 140, 120) })
+					Net.Effect("Explosion", { Position = impact, Radius = 2, Color = Color3.fromRGB(120, 110, 95) })
+					CombatService.ApplyDamage(golem, victim, golem.HitDamage, { BasicAttack = true })
+				end)
 			end
 		else
 			humanoid:MoveTo(targetPosition)
@@ -418,7 +511,16 @@ local function onCreepDied(creep, killer)
 			Net.Notify(killer.Player, string.format("+%d gold (golem shattered)", creep.KillReward or 0), "Success")
 		end
 		local model = creep.Model
-		task.delay(0.4, function()
+		-- freeze in place; the client crumbles it into the ground (GolemAnimationController)
+		if model and model.Parent then
+			model:SetAttribute("DiedAt", workspace:GetServerTimeNow())
+			local root = creep.Root
+			if root and root.Parent then
+				root.Anchored = true
+				root.CanCollide = false
+			end
+		end
+		task.delay(1.3, function()
 			if model then
 				model:Destroy()
 			end

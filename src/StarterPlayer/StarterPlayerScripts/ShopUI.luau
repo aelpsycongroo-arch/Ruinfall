@@ -41,7 +41,7 @@ local DISABLED = Color3.fromRGB(120, 105, 85)
 local BOOT_SLOT = ItemDefinitions.BOOT_SLOT
 local MAX_MYTHICS = ItemDefinitions.MAX_MYTHIC_SLOTS
 local MAX_PASSIVES = ItemDefinitions.MAX_PASSIVE_SLOTS or 3
-local PASSIVE_BASE = ItemDefinitions.PASSIVE_SLOT_BASE or 3
+local PASSIVE_BASE = ItemDefinitions.PASSIVE_SLOT_BASE or 4
 
 -- Layout (design units; the whole panel is scaled to the screen with a UIScale)
 local PANEL_W, PANEL_H = 1000, 620
@@ -186,7 +186,7 @@ function ShopUI.new(screen, clientState)
 					table.insert(ids, id)
 				end
 			end
-			sectionHeader(page, upper .. " MYTHICS  (E / R)", 1, ROLE_INFO[key])
+			sectionHeader(page, upper .. " MYTHICS  (SPACE / E / R)", 1, ROLE_INFO[key])
 			local itemGrid = grid(page, "Grid", 2, CARD, #ids)
 			for order, id in ipairs(ids) do
 				self:BuildCard(itemGrid, "Mythic", id, order)
@@ -242,14 +242,15 @@ function ShopUI.new(screen, clientState)
 	local TILE_W, TILE_H = 60, 84
 	local passiveX0 = math.floor((SIDE_W - (3 * TILE_W + 2 * 8)) / 2)
 	local TILE_LAYOUT = {
-		{ X = 8, Y = 22, Caption = "E" },
-		{ X = 94, Y = 22, Caption = "R" },
-		{ X = 196, Y = 22, Caption = "BOOTS (RMB)" },
+		{ X = 4, Y = 22, Caption = "E" },
+		{ X = 68, Y = 22, Caption = "R" },
+		{ X = 132, Y = 22, Caption = "SPACE" },
+		{ X = 208, Y = 22, Caption = "BOOTS (RMB)" },
 	}
 	for index = 1, MAX_PASSIVES do
 		TILE_LAYOUT[PASSIVE_BASE + index] = { X = passiveX0 + (index - 1) * (TILE_W + 8), Y = 124, Caption = "PASSIVE " .. index }
 	end
-	New("Frame", { Name = "BootDivider", Position = UDim2.fromOffset(186, 26), Size = UDim2.fromOffset(1, TILE_H - 6), BackgroundColor3 = MEDIEVAL.TrimDark, BorderSizePixel = 0, Parent = equipped })
+	New("Frame", { Name = "BootDivider", Position = UDim2.fromOffset(200, 26), Size = UDim2.fromOffset(1, TILE_H - 6), BackgroundColor3 = MEDIEVAL.TrimDark, BorderSizePixel = 0, Parent = equipped })
 	Label({ Text = "PASSIVES  (automatic)", Font = FONTS.Bold, TextSize = 9, TextColor3 = COLORS.Subtext, TextXAlignment = Enum.TextXAlignment.Center, Position = UDim2.fromOffset(0, 110), Size = UDim2.new(1, 0, 0, 12), Parent = equipped })
 	self.SlotTiles = {}
 	for index, layout in pairs(TILE_LAYOUT) do
@@ -286,8 +287,9 @@ function ShopUI.new(screen, clientState)
 		end)
 		self.SlotTiles[index] = { Frame = tile, Stroke = stroke, Icon = icon, Name = name, Sell = sell }
 	end
-	self.SwapButton = smallButton({ Name = "Swap", Text = "SWAP", Font = FONTS.Bold, TextSize = 8, Position = UDim2.fromOffset(69, 42), Size = UDim2.fromOffset(24, 30), Parent = equipped }, function()
-		self.Remotes.ItemRequest:FireServer("Swap")
+	-- (drag a mythic onto another mythic slot to swap them; this button swaps E and R)
+	self.SwapButton = smallButton({ Name = "Swap", Text = "SWAP", Font = FONTS.Bold, TextSize = 8, Position = UDim2.fromOffset(4, 108), Size = UDim2.fromOffset(40, 14), Parent = equipped }, function()
+		self.Remotes.ItemRequest:FireServer("Swap", 1, 2)
 	end)
 	self.DragGhost = UITheme.ItemIcon({ Name = "DragGhost", AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(52, 52), Visible = false, ZIndex = 60, Parent = root })
 	UserInputService.InputChanged:Connect(function(input)
@@ -309,19 +311,19 @@ function ShopUI.new(screen, clientState)
 			local tile = self.SlotTiles[index]
 			local topLeft, size = tile.Frame.AbsolutePosition, tile.Frame.AbsoluteSize
 			if index ~= from and mouse.X >= topLeft.X and mouse.X <= topLeft.X + size.X and mouse.Y >= topLeft.Y and mouse.Y <= topLeft.Y + size.Y then
-				self.Remotes.ItemRequest:FireServer("Swap")
+				self.Remotes.ItemRequest:FireServer("Swap", from, index)
 			end
 		end
 	end)
 
 	-- Replace dialog (both mythic slots full) ---------------------------------------------
 	local dialog = New("TextButton", { Name = "ReplaceDialog", Text = "", AutoButtonColor = false, Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.35, Visible = false, ZIndex = 20, Parent = panel })
-	local box = plaque({ Name = "Box", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(500, 210), ZIndex = 21, Parent = dialog }, true)
+	local box = plaque({ Name = "Box", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(620, 210), ZIndex = 21, Parent = dialog }, true)
 	Label({ Text = "MYTHIC SLOTS FULL", Font = FONTS.Title, TextSize = 24, TextColor3 = BAD, TextXAlignment = Enum.TextXAlignment.Center, Position = UDim2.fromOffset(0, 12), Size = UDim2.new(1, 0, 0, 28), ZIndex = 22, Parent = box })
 	self.ReplaceText = Label({ Text = "", Font = FONTS.Medium, TextSize = 12, TextColor3 = COLORS.Text, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Center, Position = UDim2.fromOffset(20, 44), Size = UDim2.new(1, -40, 0, 50), ZIndex = 22, Parent = box })
 	self.ReplaceButtons = {}
-	for index = 1, 2 do
-		local replaceButton = Button({ Name = "Replace" .. index, Text = "", Font = FONTS.Bold, TextSize = 12, TextWrapped = true, BackgroundColor3 = MEDIEVAL.WoodLight, Position = UDim2.fromOffset(20 + (index - 1) * 235, 100), Size = UDim2.fromOffset(225, 46), ZIndex = 22, Parent = box }, function()
+	for index = 1, MAX_MYTHICS do
+		local replaceButton = Button({ Name = "Replace" .. index, Text = "", Font = FONTS.Bold, TextSize = 12, TextWrapped = true, BackgroundColor3 = MEDIEVAL.WoodLight, Position = UDim2.fromOffset(20 + (index - 1) * 197, 100), Size = UDim2.fromOffset(187, 46), ZIndex = 22, Parent = box }, function()
 			self:ConfirmReplace(index)
 		end)
 		self.ReplaceButtons[index] = replaceButton
@@ -463,8 +465,8 @@ function ShopUI:GetGold()
 	return math.floor(me and me.Stats and me.Stats.Gold or 0)
 end
 
--- index 1 / 2 = mythic slots (E / R), BOOT_SLOT (3) = boot slot (right mouse),
--- PASSIVE_BASE + 1..3 (4..6) = passive slots
+-- index 1 / 2 / 3 = mythic slots (E / R / SPACE), BOOT_SLOT (4) = boot slot (right mouse),
+-- PASSIVE_BASE + 1..3 (5..7) = passive slots
 function ShopUI:GetSlotItem(index)
 	local me = self:GetMe()
 	local id
@@ -499,7 +501,12 @@ function ShopUI:OwnedSlot(itemId)
 end
 
 function ShopUI:SlotsFull()
-	return self:GetSlotItem(1) ~= nil and self:GetSlotItem(2) ~= nil
+	for index = 1, MAX_MYTHICS do
+		if self:GetSlotItem(index) == nil then
+			return false
+		end
+	end
+	return true
 end
 
 function ShopUI:PassiveSlotsFull()
@@ -631,7 +638,7 @@ function ShopUI:RefreshDetails()
 		local isPassive = ItemDefinitions.IsPassive(item)
 		self.DetailIcon.Set(item)
 		self.DetailName.Text = item.Name
-		local kindText = isPassive and "PASSIVE ITEM (automatic)" or (ItemDefinitions.IsBoots(item) and (string.upper(item.BootType or "") .. " BOOTS (RMB)") or "MYTHIC (E / R)")
+		local kindText = isPassive and "PASSIVE ITEM (automatic)" or (ItemDefinitions.IsBoots(item) and (string.upper(item.BootType or "") .. " BOOTS (RMB)") or "MYTHIC (SPACE / E / R)")
 		self.DetailClass.Text = (item.Class and ("CLASS: " .. string.upper(item.Class)) or "CLASS: ANY") .. "   |   " .. kindText
 		self.DetailPrice.Text = string.format("PRICE: %d GOLD   (sells for %d)", item.Price, ItemDefinitions.GetSellValue(item))
 		local stats = ItemDefinitions.GetStatText(item)
@@ -785,7 +792,7 @@ end
 
 function ShopUI:OpenReplaceDialog(item)
 	self.PendingReplace = item.Id
-	self.ReplaceText.Text = string.format("Both mythic slots are occupied. Choose a slot for %s - the item there is sold back for half its price. Nothing is replaced unless you choose.", item.Name)
+	self.ReplaceText.Text = string.format("All mythic slots are occupied. Choose a slot for %s - the item there is sold back for half its price. Nothing is replaced unless you choose.", item.Name)
 	for index, button in ipairs(self.ReplaceButtons) do
 		local current = self:GetSlotItem(index)
 		button.Text = current and string.format("REPLACE SLOT %d (%s)\n%s  (+%d gold)", index, ItemDefinitions.SLOT_KEYS[index], current.Name, ItemDefinitions.GetSellValue(current)) or ("SLOT " .. index)

@@ -134,14 +134,16 @@ do
 	end
 end
 
--- Input mapping shown on the ability bar (DO NOT CHANGE: LM melee, Q class ability,
--- E / R item slots, MR boots). The 3 passive slots next to the boots have no key.
+-- Input mapping shown on the ability bar: Q class ability, SPACE / E / R active items, MR boots
+-- (melee stays on the left mouse button but has no slot). Frame = the painted slot it uses in
+-- the HUD layout (the old LM frame now shows Q, the old Q frame shows SPACE).
+-- The 3 passive slots next to the boots have no key.
 Theme.Slots = {
-	{ Key = "LM", Name = "MELEE", Kind = "Attack" },
-	{ Key = "Q", Name = "BLOOD RUSH", Kind = "Ability" },
-	{ Key = "E", Name = "ITEM", Kind = "Item", Index = 1 },
-	{ Key = "R", Name = "ITEM", Kind = "Item", Index = 2 },
-	{ Key = "MR", Name = "BOOTS", Kind = "Boots" },
+	{ Key = "Q", Frame = "LM", Name = "BLOOD RUSH", Kind = "Ability" },
+	{ Key = "SPACE", Frame = "Q", Name = "ITEM", Kind = "Item", Index = 3 },
+	{ Key = "E", Frame = "E", Name = "ITEM", Kind = "Item", Index = 1 },
+	{ Key = "R", Frame = "R", Name = "ITEM", Kind = "Item", Index = 2 },
+	{ Key = "MR", Frame = "MR", Name = "BOOTS", Kind = "Boots" },
 }
 
 return Theme

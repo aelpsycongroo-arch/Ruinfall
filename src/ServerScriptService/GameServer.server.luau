@@ -17,6 +17,7 @@ local TeleportService = game:GetService("TeleportService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Constants = require(Shared:WaitForChild("Constants"))
 local ClassDefinitions = require(Shared:WaitForChild("ClassDefinitions"))
+local ItemDefinitions = require(Shared:WaitForChild("ItemDefinitions"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local Net = require(ServerScriptService:WaitForChild("Net"))
@@ -292,12 +293,12 @@ Net.Get("AbilityRequest").OnServerEvent:Connect(function(player, slot, aimPositi
 		if not ok and reason then
 			Net.Notify(player, reason, "Warning")
 		end
-	elseif slot == "E" or slot == "R" or slot == "M2" then
-		-- item abilities: mythic slot 1 -> E, slot 2 -> R, boot slot -> right mouse ("M2")
+	elseif slot == "E" or slot == "R" or slot == "SPACE" or slot == "M2" then
+		-- item abilities: mythic slot 1 -> E, 2 -> R, 3 -> SPACE, boot slot -> right mouse ("M2")
 		if targetId ~= nil and type(targetId) ~= "string" then
 			return
 		end
-		local index = (slot == "E" and 1) or (slot == "R" and 2) or 3
+		local index = (slot == "E" and 1) or (slot == "R" and 2) or (slot == "SPACE" and 3) or ItemDefinitions.BOOT_SLOT
 		local ok, reason = ItemService.UseSlot(entity, index, clampAim(entity, aimPosition), targetId)
 		if not ok and reason and reason ~= "Cooldown" then
 			Net.Notify(player, reason, "Warning")

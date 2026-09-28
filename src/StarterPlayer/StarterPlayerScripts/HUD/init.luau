@@ -10,7 +10,7 @@
 		HUD.TopLeftPanel  team plaque, next ruin, own flag, minion wave
 		HUD.Scoreboard    team scoreboard (top centre)
 		HUD.PlayerInfo    portrait, class, health, gold, status chips (bottom left)
-		HUD.AbilityBar    LM / Q / E / R / MR controls with cooldowns (bottom right)
+		HUD.AbilityBar    Q / SPACE / E / R / MR controls with cooldowns (bottom right)
 	The minimap draws into Root.Minimap.MapHolder (MinimapController).
 
 	Public API (used by UIController / MobileController / ClientController):

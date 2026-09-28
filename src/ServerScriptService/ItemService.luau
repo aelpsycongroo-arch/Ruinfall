@@ -20,7 +20,7 @@ local MatchManager = require(script.Parent:WaitForChild("MatchManager"))
 -- Constants
 local STATE = Constants.MatchState
 local MAX_SLOTS = ItemDefinitions.MAX_MYTHIC_SLOTS
-local BOOT_SLOT = ItemDefinitions.BOOT_SLOT -- 3: the separate boot slot (right mouse)
+local BOOT_SLOT = ItemDefinitions.BOOT_SLOT -- 4: the separate boot slot (right mouse)
 local MAX_PASSIVES = ItemDefinitions.MAX_PASSIVE_SLOTS -- 3 passive items (automatic, no hotkey)
 local PASSIVE_BASE = ItemDefinitions.PASSIVE_SLOT_BASE -- slot index of passive N = PASSIVE_BASE + N
 local COOLDOWN_GRACE = 0.15
@@ -336,16 +336,21 @@ function ItemService.Unequip(participant, slot)
 	return removed
 end
 
--- Slot 1 <-> Slot 2. Hotkeys follow slots automatically (slot 1 = E, slot 2 = R).
-function ItemService.Swap(player, participant)
+-- Swap two mythic slots (default E <-> R). Hotkeys follow slots (1 = E, 2 = R, 3 = SPACE).
+function ItemService.Swap(player, participant, from, to)
 	if MatchManager.State ~= STATE.ACTIVE then
 		return reject(player, "Items can only be swapped during a match")
 	end
+	from = isValidSlot(from) and from or 1
+	to = isValidSlot(to) and to or 2
+	if from == to then
+		return false
+	end
 	local mythics = mythicsOf(participant)
-	if not mythics[1] and not mythics[2] then
+	if not mythics[from] and not mythics[to] then
 		return reject(player, "No mythic items to swap")
 	end
-	mythics[1], mythics[2] = mythics[2], mythics[1]
+	mythics[from], mythics[to] = mythics[to], mythics[from]
 	changed(participant)
 	return true
 end
@@ -1125,7 +1130,583 @@ handlers.LeapingBound = function(entity, ability, origin, aimPosition)
 	return true
 end
 
--- slot: 1 (E) or 2 (R). targetId only matters for Unit-targeted abilities.
+-- Class active items, set 2 ------------------------------------------------------------------
+-- enemies in a cone in front of the caster (with line of sight)
+local function coneVictims(entity, origin, direction, range, arc)
+	local cosHalfArc = math.cos(math.rad(arc / 2))
+	local results = {}
+	for _, victim in ipairs(enemiesInRadius(entity, origin, range, true)) do
+		local position = CombatService.GetPosition(victim)
+		local offset = Util.Flat(position - origin)
+		if (offset.Magnitude <= victim.Radius + 1 or offset.Unit:Dot(direction) >= cosHalfArc) and CombatService.HasLineOfSight(origin, position) then
+			table.insert(results, victim)
+		end
+	end
+	return results
+end
+
+local function stunWithEffect(entity, victim, duration)
+	if victim.Alive and duration and duration > 0 then
+		CombatService.Stun(victim, duration, entity)
+		Net.Effect("Stun", { Position = CombatService.GetPosition(victim), Duration = duration })
+	end
+end
+
+local function markVulnerable(victim, amount, duration, now)
+	victim.VulnerableUntil = now + duration
+	victim.VulnerableAmount = math.max(amount, (victim.VulnerableUntil or 0) > now and victim.VulnerableAmount or 0)
+	if victim.Model then
+		victim.Model:SetAttribute("VulnerableUntil", victim.VulnerableUntil)
+	end
+end
+
+-- jump from enemy to enemy (Ricochet Blade, Chain Lightning)
+local function bounceChain(entity, ability, first, jumps, jumpRange, falloff, style)
+	local hit = { [first] = true }
+	local current, damage = first, ability.Damage
+	local from = CombatService.GetPosition(entity)
+	for jump = 0, jumps do
+		local target = current
+		task.delay(jump * 0.12, function()
+			if not CombatService.Active or not target.Alive then
+				return
+			end
+			local to = CombatService.GetPosition(target)
+			Net.Effect("Lightning", { From = from, To = to, Color = ability.Color })
+			if style == "Blade" then
+				Net.Effect("PointStrike", { From = from, Position = to, Color = ability.Color })
+			end
+			CombatService.ApplyDamage(entity, target, damage, { IgnoreArmor = ability.TrueDamage })
+			from = to
+		end)
+		damage *= 1 - falloff
+		local nextTarget = CombatService.FindNearestEnemy(entity, CombatService.GetPosition(current), jumpRange, function(candidate)
+			return not hit[candidate] and isUnitEnemy(entity, candidate) and not CombatService.IsStealthed(candidate)
+		end)
+		if not nextTarget or jump == jumps then
+			break
+		end
+		hit[nextTarget] = true
+		current = nextTarget
+	end
+end
+
+-- Assassin ----------------------------------------------------------------------------------
+handlers.Assassinate = function(entity, ability, origin, _, targetId)
+	local target, targetPosition = validUnitTarget(entity, ability, origin, targetId)
+	if not target then
+		return false, targetPosition
+	end
+	local toTarget = Util.Flat(targetPosition - origin)
+	local forward = toTarget.Magnitude > 0.1 and toTarget.Unit or Util.Flat(entity.Root.CFrame.LookVector)
+	local travel = toTarget + forward * (target.Radius + 2.5)
+	Net.Effect("Stealth", { Position = origin, Color = ability.Color })
+	CombatService.Dash(entity, travel.Unit, travel.Magnitude, 0.1)
+	local damage = ability.Damage
+	task.delay(0.12, function()
+		if not CombatService.Active or not entity.Alive or not target.Alive then
+			return
+		end
+		local execute = target.Health / math.max(1, target.MaxHealth) < ability.ExecuteThreshold
+		Net.Effect("PointStrike", { From = CombatService.GetPosition(entity), Position = CombatService.GetPosition(target), Color = ability.Color })
+		CombatService.ApplyDamage(entity, target, execute and damage * (1 + ability.ExecuteBonus) or damage, { Crit = true })
+		if entity.Alive then
+			CombatService.SetStealth(entity, ability.StealthAfter)
+		end
+	end)
+	return true
+end
+
+handlers.VenomToxin = function(entity, ability, origin, aimPosition)
+	local direction = Util.FlatDirection(origin, aimPosition, entity.Root.CFrame.LookVector)
+	CombatService.BreakStealth(entity)
+	local poison = ability.Damage * ability.PoisonPercent
+	CombatService.FireProjectile({
+		Owner = entity, Origin = origin + direction * 1.2, Direction = direction, Speed = ability.Speed,
+		Range = ability.Range, Radius = 1.1, Damage = ability.Damage, Style = "Knife",
+		OnEnd = function(_, victim)
+			if not victim or not victim.Alive then
+				return
+			end
+			CombatService.Slow(victim, ability.Slow, ability.SlowDuration, entity)
+			for tick = 1, ability.PoisonTicks do
+				task.delay(tick, function()
+					if CombatService.Active and victim.Alive then
+						Net.Effect("Shockwave", { Position = CombatService.GetPosition(victim), Radius = 1.5, Color = ability.Color })
+						CombatService.ApplyDamage(entity, victim, poison, { IgnoreArmor = true, NoChain = true })
+					end
+				end)
+			end
+		end,
+	})
+	return true
+end
+
+handlers.DeathMark = function(entity, ability, origin, _, targetId, now)
+	local target, targetPosition = validUnitTarget(entity, ability, origin, targetId)
+	if not target then
+		return false, targetPosition
+	end
+	CombatService.BreakStealth(entity)
+	Net.Effect("PointStrike", { From = origin, Position = targetPosition, Color = ability.Color })
+	Net.Effect("Telegraph", { Position = targetPosition, Radius = 2.5, Duration = ability.Duration, Color = ability.Color })
+	CombatService.ApplyDamage(entity, target, ability.Damage)
+	if target.Alive then
+		markVulnerable(target, ability.Vulnerable, ability.Duration, now)
+	end
+	return true
+end
+
+handlers.RicochetBlade = function(entity, ability, origin, _, targetId)
+	local target, reason = validUnitTarget(entity, ability, origin, targetId)
+	if not target then
+		return false, reason
+	end
+	CombatService.BreakStealth(entity)
+	bounceChain(entity, ability, target, ability.Bounces, ability.BounceRange, ability.BounceFalloff, "Blade")
+	return true
+end
+
+handlers.Evasion = function(entity, ability, origin, _, _, now)
+	entity.EvadeUntil = now + ability.Duration
+	CombatService.Haste(entity, ability.HasteBonus, ability.Duration)
+	if entity.Model then
+		entity.Model:SetAttribute("EvadeUntil", entity.EvadeUntil)
+	end
+	Net.Effect("Stealth", { Position = origin, Color = ability.Color })
+	Net.Effect("Shockwave", { Position = origin, Radius = 4, Color = ability.Color })
+	return true
+end
+
+-- Mage --------------------------------------------------------------------------------------
+handlers.ChainLightning = function(entity, ability, origin, _, targetId)
+	local target, reason = validUnitTarget(entity, ability, origin, targetId)
+	if not target then
+		return false, reason
+	end
+	CombatService.BreakStealth(entity)
+	bounceChain(entity, ability, target, ability.Chains, ability.ChainRange, ability.ChainFalloff, "Lightning")
+	return true
+end
+
+handlers.Meteor = function(entity, ability, origin, aimPosition)
+	local center = pointInRange(origin, aimPosition, ability.Range)
+	CombatService.BreakStealth(entity)
+	Net.Effect("Telegraph", { Position = center, Radius = ability.Radius, Duration = ability.Delay, Color = ability.Color })
+	Net.Effect("Meteor", { Position = center, Delay = ability.Delay, Color = ability.Color })
+	task.delay(ability.Delay, function()
+		if not CombatService.Active then
+			return
+		end
+		Net.Effect("Explosion", { Position = center, Radius = ability.Radius, Color = ability.Color })
+		Net.Effect("Shockwave", { Position = center, Radius = ability.Radius + 2, Color = ability.Color })
+		for _, victim in ipairs(enemiesInRadius(entity, center, ability.Radius, true)) do
+			CombatService.ApplyDamage(entity, victim, ability.Damage, { IgnoreArmor = ability.TrueDamage })
+			stunWithEffect(entity, victim, ability.Stun)
+		end
+	end)
+	return true
+end
+
+handlers.VoidRift = function(entity, ability, origin, aimPosition)
+	local center = pointInRange(origin, aimPosition, ability.Range)
+	CombatService.BreakStealth(entity)
+	Net.Effect("Telegraph", { Position = center, Radius = ability.Radius, Duration = ability.Duration, Color = ability.Color })
+	local ticks = math.floor(ability.Duration / ability.TickInterval + 0.5)
+	for tick = 1, ticks do
+		task.delay(tick * ability.TickInterval, function()
+			if not CombatService.Active then
+				return
+			end
+			Net.Effect("Shockwave", { Position = center, Radius = ability.Radius, Color = ability.Color })
+			for _, victim in ipairs(enemiesInRadius(entity, center, ability.Radius, true)) do
+				CombatService.ApplyDamage(entity, victim, ability.Damage, { IgnoreArmor = ability.TrueDamage, NoChain = true })
+				if victim.Alive then
+					CombatService.Slow(victim, ability.Slow, ability.SlowDuration, entity)
+				end
+			end
+		end)
+	end
+	return true
+end
+
+handlers.ManaAegis = function(entity, ability, origin)
+	CombatService.AddShield(entity, ability.Shield, ability.Duration)
+	Net.Effect("Shockwave", { Position = origin, Radius = 4, Color = ability.Color })
+	task.delay(ability.Duration, function()
+		if not CombatService.Active or not entity.Alive then
+			return
+		end
+		local position = CombatService.GetPosition(entity)
+		Net.Effect("Explosion", { Position = position, Radius = ability.ExplodeRadius, Color = ability.Color })
+		for _, victim in ipairs(enemiesInRadius(entity, position, ability.ExplodeRadius, true)) do
+			CombatService.ApplyDamage(entity, victim, ability.Damage, { IgnoreArmor = ability.TrueDamage })
+		end
+	end)
+	return true
+end
+
+handlers.TimeWarp = function(entity, ability, origin, aimPosition)
+	local center = pointInRange(origin, aimPosition, ability.Range)
+	CombatService.BreakStealth(entity)
+	Net.Effect("Telegraph", { Position = center, Radius = ability.Radius, Duration = ability.SlowDuration, Color = ability.Color })
+	Net.Effect("Shockwave", { Position = center, Radius = ability.Radius, Color = ability.Color })
+	for _, victim in ipairs(enemiesInRadius(entity, center, ability.Radius, true)) do
+		CombatService.ApplyDamage(entity, victim, ability.Damage, { IgnoreArmor = ability.TrueDamage })
+		if victim.Alive then
+			CombatService.Slow(victim, ability.Slow, ability.SlowDuration, entity)
+		end
+	end
+	CombatService.Haste(entity, ability.HasteBonus, ability.HasteDuration)
+	return true
+end
+
+-- Marksman ----------------------------------------------------------------------------------
+handlers.Snipe = function(entity, ability, origin, aimPosition)
+	local direction = Util.FlatDirection(origin, aimPosition, entity.Root.CFrame.LookVector)
+	CombatService.BreakStealth(entity)
+	local aimLength = rayLength(origin, direction, ability.Range)
+	Net.Effect("Telegraph", { Position = origin + direction * 2, Radius = 1.5, Duration = ability.Delay, Color = ability.Color })
+	Net.Effect("Dash", { From = origin, To = origin + direction * aimLength, Color = ability.Color })
+	local damage = ability.Damage
+	task.delay(ability.Delay, function()
+		if not CombatService.Active or not entity.Alive or CombatService.IsStunned(entity) then
+			return -- interrupted
+		end
+		local from = CombatService.GetPosition(entity)
+		local length = rayLength(from, direction, ability.Range)
+		local first = lineVictims(entity, from, direction, length, ability.Width)[1]
+		local victim = first and first.Entity
+		local finish = victim and CombatService.GetPosition(victim) or (from + direction * length)
+		Net.Effect("Lightning", { From = from, To = finish, Color = ability.Color })
+		Net.Effect("PointStrike", { From = from, Position = finish, Color = ability.Color })
+		if victim then
+			CombatService.ApplyDamage(entity, victim, damage, { Crit = true })
+		end
+	end)
+	return true
+end
+
+local trapFolder = nil
+handlers.BearTrap = function(entity, ability, origin, aimPosition, _, now)
+	local center = pointInRange(origin, aimPosition, ability.Range)
+	entity.Traps = entity.Traps or {}
+	-- only MaxTraps at once: the oldest one snaps shut uselessly
+	while #entity.Traps >= ability.MaxTraps do
+		local oldest = table.remove(entity.Traps, 1)
+		oldest.Done = true
+		if oldest.Part then
+			oldest.Part:Destroy()
+		end
+	end
+	if not trapFolder or not trapFolder.Parent then
+		trapFolder = Instance.new("Folder")
+		trapFolder.Name = "Traps"
+		trapFolder.Parent = workspace:FindFirstChild("RuinfallMap") or workspace
+	end
+	local part = Instance.new("Part")
+	part.Name = "BearTrap"
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.Shape = Enum.PartType.Cylinder
+	part.Size = Vector3.new(0.3, ability.Radius * 1.3, ability.Radius * 1.3)
+	part.CFrame = CFrame.new(center.X, center.Y + 0.1, center.Z) * CFrame.Angles(0, 0, math.rad(90))
+	part.Material = Enum.Material.Metal
+	part.Color = Color3.fromRGB(70, 64, 58)
+	part.Transparency = 0.45 -- hard to spot
+	part.Parent = trapFolder
+	local trap = { Part = part, Done = false }
+	table.insert(entity.Traps, trap)
+	Net.Effect("Shockwave", { Position = center, Radius = 2, Color = ability.Color })
+	local damage, expires = ability.Damage, now + ability.TrapDuration
+	task.spawn(function()
+		while not trap.Done and CombatService.Active and Util.Now() < expires do
+			task.wait(0.15)
+			if trap.Done then
+				break
+			end
+			local victim = enemiesInRadius(entity, center, ability.Radius, true)[1]
+			if victim then
+				Net.Effect("Explosion", { Position = center, Radius = ability.Radius, Color = ability.Color })
+				CombatService.ApplyDamage(entity, victim, damage)
+				stunWithEffect(entity, victim, ability.Stun)
+				break
+			end
+		end
+		trap.Done = true
+		if part.Parent then
+			part:Destroy()
+		end
+		local index = table.find(entity.Traps, trap)
+		if index then
+			table.remove(entity.Traps, index)
+		end
+	end)
+	return true
+end
+
+handlers.HuntersMark = function(entity, ability, origin, _, targetId, now)
+	local target, targetPosition = validUnitTarget(entity, ability, origin, targetId)
+	if not target then
+		return false, targetPosition
+	end
+	Net.Effect("PointStrike", { From = origin, Position = targetPosition, Color = ability.Color })
+	Net.Effect("Telegraph", { Position = targetPosition, Radius = 2.5, Duration = ability.Duration, Color = ability.Color })
+	markVulnerable(target, ability.Vulnerable, ability.Duration, now)
+	frenzy(entity, ability, now)
+	return true
+end
+
+handlers.Buckshot = function(entity, ability, origin, aimPosition)
+	local direction = Util.FlatDirection(origin, aimPosition, entity.Root.CFrame.LookVector)
+	CombatService.BreakStealth(entity)
+	Net.Effect("Melee", { Origin = origin, Direction = direction, Range = ability.Range, Arc = ability.Arc, Color = ability.Color, Empowered = true })
+	for index = -2, 2 do
+		local spread = CFrame.fromAxisAngle(Vector3.yAxis, math.rad(index * ability.Arc / 5)):VectorToWorldSpace(direction)
+		Net.Effect("Dash", { From = origin, To = origin + spread * ability.Range, Color = ability.Color })
+	end
+	for _, victim in ipairs(coneVictims(entity, origin, direction, ability.Range, ability.Arc)) do
+		CombatService.ApplyDamage(entity, victim, ability.Damage)
+		if victim.Alive then
+			local away = Util.Flat(CombatService.GetPosition(victim) - origin)
+			CombatService.Dash(victim, away.Magnitude > 0.2 and away.Unit or direction, ability.KnockDistance, 0.2)
+		end
+	end
+	CombatService.Dash(entity, -direction, ability.Recoil, 0.2)
+	return true
+end
+
+handlers.ArrowStorm = function(entity, ability, origin)
+	local shots = math.floor(ability.Duration / ability.Interval)
+	Net.Effect("Shockwave", { Position = origin, Radius = 5, Color = ability.Color })
+	for shot = 1, shots do
+		task.delay((shot - 1) * ability.Interval, function()
+			if not CombatService.Active or not entity.Alive or CombatService.IsStunned(entity) then
+				return
+			end
+			local from = CombatService.GetPosition(entity)
+			local target = CombatService.FindNearestEnemy(entity, from, ability.Range, function(candidate)
+				return isUnitEnemy(entity, candidate) and not CombatService.IsStealthed(candidate)
+			end)
+			if not target then
+				return
+			end
+			local direction = Util.FlatDirection(from, CombatService.GetPosition(target), entity.Root.CFrame.LookVector)
+			CombatService.FireProjectile({
+				Owner = entity, Origin = from + direction * 1.5, Direction = direction, Speed = 110,
+				Range = ability.Range + 4, Radius = 1.1, Damage = ability.Damage, Style = "Arrow",
+			})
+		end)
+	end
+	return true
+end
+
+-- Tank --------------------------------------------------------------------------------------
+handlers.ChainHook = function(entity, ability, origin, aimPosition)
+	local direction = Util.FlatDirection(origin, aimPosition, entity.Root.CFrame.LookVector)
+	local length = rayLength(origin, direction, ability.Range)
+	CombatService.BreakStealth(entity)
+	local first = lineVictims(entity, origin, direction, length, ability.Width)[1]
+	local victim = first and first.Entity
+	local finish = victim and CombatService.GetPosition(victim) or (origin + direction * length)
+	Net.Effect("Lightning", { From = origin, To = finish, Color = ability.Color })
+	Net.Effect("Dash", { From = origin, To = finish, Color = ability.Color })
+	if victim then
+		CombatService.ApplyDamage(entity, victim, ability.Damage)
+		if victim.Alive then
+			local toCaster = Util.Flat(origin - CombatService.GetPosition(victim))
+			local pull = toCaster.Magnitude - (victim.Radius + 3)
+			if pull > 0.5 then
+				CombatService.Dash(victim, toCaster.Unit, pull, 0.25)
+			end
+			stunWithEffect(entity, victim, ability.Stun)
+		end
+	end
+	return true
+end
+
+handlers.Challenge = function(entity, ability, origin)
+	CombatService.BreakStealth(entity)
+	Net.Effect("Shockwave", { Position = origin, Radius = ability.Radius, Color = ability.Color })
+	Net.Effect("Explosion", { Position = origin, Radius = 3, Color = ability.Color })
+	for _, victim in ipairs(enemiesInRadius(entity, origin, ability.Radius, true)) do
+		CombatService.Taunt(victim, entity, ability.Taunt)
+		Net.Effect("Stun", { Position = CombatService.GetPosition(victim), Duration = ability.Taunt })
+	end
+	CombatService.AddShield(entity, ability.Shield, ability.Duration)
+	return true
+end
+
+handlers.StoneForm = function(entity, ability, origin, _, _, now)
+	entity.DamageReductionUntil = now + ability.Duration
+	entity.DamageReductionAmount = ability.DamageReduction
+	if entity.Model then
+		entity.Model:SetAttribute("StoneFormUntil", entity.DamageReductionUntil)
+	end
+	entity.SlowUntil, entity.SlowAmount = now + ability.Duration, ability.SelfSlow -- self-inflicted, ignores tenacity
+	CombatService.RecomputeSpeed(entity)
+	Net.Effect("SpikedScale", { EntityId = entity.Id, Position = origin, Duration = ability.Duration, Color = ability.Color })
+	Net.Effect("Shockwave", { Position = origin, Radius = 4, Color = ability.Color })
+	return true
+end
+
+handlers.Fissure = function(entity, ability, origin, aimPosition)
+	local direction = Util.FlatDirection(origin, aimPosition, entity.Root.CFrame.LookVector)
+	local length = rayLength(origin, direction, ability.Range)
+	CombatService.BreakStealth(entity)
+	Net.Effect("Dash", { From = origin, To = origin + direction * length, Color = ability.Color })
+	for step = 1, math.max(1, math.floor(length / 5)) do
+		local point = origin + direction * (step * 5)
+		task.delay(step * 0.04, function()
+			Net.Effect("Explosion", { Position = point, Radius = ability.Width, Color = ability.Color })
+		end)
+	end
+	for _, hit in ipairs(lineVictims(entity, origin, direction, length, ability.Width)) do
+		CombatService.ApplyDamage(entity, hit.Entity, ability.Damage)
+		stunWithEffect(entity, hit.Entity, ability.Stun)
+	end
+	return true
+end
+
+handlers.Sanctuary = function(entity, ability, origin)
+	Net.Effect("Shockwave", { Position = origin, Radius = ability.Radius, Color = ability.Color })
+	Net.Effect("Telegraph", { Position = origin, Radius = ability.Radius, Duration = 0.8, Color = ability.Color })
+	for _, ally in ipairs(CombatService.GetEntitiesInRadius(origin, ability.Radius, function(candidate)
+		return candidate.Kind == "Hero" and candidate.Alive and candidate.Team == entity.Team
+	end)) do
+		CombatService.Heal(ally, ability.Heal or 0, true)
+		CombatService.AddShield(ally, ability.Shield, ability.Duration)
+	end
+	return true
+end
+
+-- Fighter -----------------------------------------------------------------------------------
+handlers.CrimsonCleave = function(entity, ability, origin, aimPosition)
+	local direction = Util.FlatDirection(origin, aimPosition, entity.Root.CFrame.LookVector)
+	CombatService.BreakStealth(entity)
+	Net.Effect("Melee", { Origin = origin, Direction = direction, Range = ability.Range, Arc = ability.Arc, Color = ability.Color, Empowered = true, EntityId = entity.Id })
+	local dealt = 0
+	for _, victim in ipairs(coneVictims(entity, origin, direction, ability.Range, ability.Arc)) do
+		dealt += CombatService.ApplyDamage(entity, victim, ability.Damage) or 0
+	end
+	if dealt > 0 then
+		CombatService.Heal(entity, dealt * ability.LifestealPercent, true)
+	end
+	return true
+end
+
+handlers.RendingCharge = function(entity, ability, origin, aimPosition)
+	local direction = Util.FlatDirection(origin, aimPosition, entity.Root.CFrame.LookVector)
+	local length = rayLength(origin, direction, ability.Range)
+	CombatService.BreakStealth(entity)
+	local first = lineVictims(entity, origin, direction, length, ability.Width)[1]
+	local victim = first and first.Entity
+	local travel = victim and math.max(0, first.Along - (victim.Radius + 2)) or length
+	CombatService.Dash(entity, direction, travel, 0.22)
+	local damage = ability.Damage
+	if victim then
+		task.delay(0.22, function()
+			if not CombatService.Active or not entity.Alive or not victim.Alive then
+				return
+			end
+			Net.Effect("HeavyKick", { Origin = CombatService.GetPosition(entity), Position = CombatService.GetPosition(victim), Color = ability.Color })
+			CombatService.ApplyDamage(entity, victim, damage)
+			if victim.Alive then
+				CombatService.Slow(victim, ability.Slow, ability.SlowDuration, entity)
+			end
+		end)
+	end
+	return true
+end
+
+handlers.BattleStandard = function(entity, ability, origin)
+	local center = Vector3.new(origin.X, origin.Y, origin.Z)
+	local banner = Instance.new("Part")
+	banner.Name = "BattleStandard"
+	banner.Anchored = true
+	banner.CanCollide = false
+	banner.CanQuery = false
+	banner.CanTouch = false
+	banner.Size = Vector3.new(0.35, 9, 0.35)
+	banner.Material = Enum.Material.Wood
+	banner.Color = Color3.fromRGB(90, 60, 35)
+	banner.CFrame = CFrame.new(center.X, center.Y + 1.5, center.Z)
+	local cloth = Instance.new("Part")
+	cloth.Name = "Cloth"
+	cloth.Anchored = true
+	cloth.CanCollide = false
+	cloth.CanQuery = false
+	cloth.CanTouch = false
+	cloth.Size = Vector3.new(2.6, 3.2, 0.12)
+	cloth.Material = Enum.Material.Fabric
+	cloth.Color = entity.Team and Constants.GetTeamColor(entity.Team) or ability.Color
+	cloth.CFrame = banner.CFrame * CFrame.new(1.4, 2.6, 0)
+	cloth.Parent = banner
+	banner.Parent = workspace:FindFirstChild("RuinfallMap") or workspace
+	Net.Effect("Shockwave", { Position = center, Radius = ability.Radius, Color = ability.Color })
+	Net.Effect("Telegraph", { Position = center, Radius = ability.Radius, Duration = ability.Duration, Color = ability.Color })
+	local ticks = math.floor(ability.Duration / 0.5)
+	task.spawn(function()
+		for _ = 1, ticks do
+			task.wait(0.5)
+			if not CombatService.Active then
+				break
+			end
+			for _, ally in ipairs(CombatService.GetEntitiesInRadius(center, ability.Radius, function(candidate)
+				return candidate.Kind == "Hero" and candidate.Alive and candidate.Team == entity.Team
+			end)) do
+				CombatService.Heal(ally, ally.MaxHealth * ability.HealPerSecond * 0.5, false)
+			end
+			for _, victim in ipairs(enemiesInRadius(entity, center, ability.Radius, true)) do
+				CombatService.Slow(victim, ability.Slow, 0.7, entity)
+			end
+		end
+		banner:Destroy()
+	end)
+	return true
+end
+
+handlers.Guillotine = function(entity, ability, origin, aimPosition)
+	local direction = Util.FlatDirection(origin, aimPosition, entity.Root.CFrame.LookVector)
+	CombatService.BreakStealth(entity)
+	Net.Effect("Telegraph", { Position = origin + direction * (ability.Range * 0.55), Radius = ability.Range * 0.45, Duration = ability.Delay, Color = ability.Color })
+	local damage = ability.Damage
+	task.delay(ability.Delay, function()
+		if not CombatService.Active or not entity.Alive or CombatService.IsStunned(entity) then
+			return
+		end
+		local from = CombatService.GetPosition(entity)
+		Net.Effect("Melee", { Origin = from, Direction = direction, Range = ability.Range, Arc = ability.Arc, Color = ability.Color, Empowered = true, EntityId = entity.Id })
+		Net.Effect("HeavyKick", { Origin = from, Position = from + direction * (ability.Range * 0.6), Color = ability.Color })
+		for _, victim in ipairs(coneVictims(entity, from, direction, ability.Range, ability.Arc)) do
+			local missing = 1 - victim.Health / math.max(1, victim.MaxHealth)
+			CombatService.ApplyDamage(entity, victim, damage * (1 + missing * ability.MissingHealthBonus), { Crit = missing > 0.5 })
+		end
+	end)
+	return true
+end
+
+handlers.LastStand = function(entity, ability, origin, _, _, now)
+	entity.UndyingUntil = now + ability.Duration
+	CombatService.ClearStun(entity)
+	CombatService.RecomputeSpeed(entity)
+	if entity.Model then
+		entity.Model:SetAttribute("UndyingUntil", entity.UndyingUntil)
+	end
+	Net.Effect("SpikedScale", { EntityId = entity.Id, Position = origin, Duration = ability.Duration, Color = ability.Color })
+	Net.Effect("Shockwave", { Position = origin, Radius = 6, Color = ability.Color })
+	local heal = ability.Heal or 0
+	task.delay(ability.Duration, function()
+		if CombatService.Active and entity.Alive then
+			CombatService.Heal(entity, heal, true)
+		end
+	end)
+	return true
+end
+
+-- slot: 1 (E), 2 (R) or 3 (SPACE), or BOOT_SLOT. targetId only matters for Unit-targeted abilities.
 function ItemService.UseSlot(entity, slot, aimPosition, targetId)
 	if not CombatService.Active or not entity or not entity.Alive or entity.Kind ~= "Hero" or not entity.Participant then
 		return false, "Unavailable"
@@ -1205,7 +1786,7 @@ function ItemService.HandleRequest(player, action, arg1, arg2)
 	elseif action == "Sell" then
 		return ItemService.Sell(player, participant, arg1)
 	elseif action == "Swap" then
-		return ItemService.Swap(player, participant)
+		return ItemService.Swap(player, participant, arg1, arg2)
 	elseif action == "UpgradeMinions" or action == "BuyCreeps" then
 		-- team-wide minion upgrade (minion waves themselves spawn automatically)
 		local creepService = getCreepService()
@@ -1230,7 +1811,7 @@ end
 function ItemService.GetSlots(participant)
 	local mythics = mythicsOf(participant)
 	local passives = passivesOf(participant)
-	return mythics[1], mythics[2], participant.Boots, passives[1], passives[2], passives[3]
+	return mythics[1], mythics[2], mythics[3], participant.Boots, passives[1], passives[2], passives[3]
 end
 
 return ItemService

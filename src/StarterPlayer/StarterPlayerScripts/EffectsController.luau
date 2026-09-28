@@ -292,6 +292,31 @@ handlers.Telegraph = function(data)
 	end)
 end
 
+-- Meteor (Meteor Codex): a blazing rock falls from the sky onto the target over Delay seconds
+handlers.Meteor = function(data)
+	if not visible(data.Position) then
+		return
+	end
+	local rock = acquire("MeteorRock", Enum.PartType.Ball, Enum.Material.Basalt)
+	local glow = acquire("MeteorGlow", Enum.PartType.Ball)
+	rock.Color = Color3.fromRGB(90, 50, 30)
+	glow.Color = data.Color
+	local target = Vector3.new(data.Position.X, 1, data.Position.Z)
+	local start = target + Vector3.new(-18, 70, 10)
+	animate(data.Delay or 1, function(alpha)
+		local position = start:Lerp(target, alpha * alpha)
+		rock.Size = Vector3.new(3.2, 3.2, 3.2)
+		rock.CFrame = CFrame.new(position)
+		rock.Transparency = 0
+		glow.Size = Vector3.new(5.5, 5.5, 5.5)
+		glow.CFrame = CFrame.new(position)
+		glow.Transparency = 0.45
+	end, function()
+		release("MeteorRock", rock)
+		release("MeteorGlow", glow)
+	end)
+end
+
 handlers.Shockwave = function(data)
 	if not visible(data.Position) then
 		return
