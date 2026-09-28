@@ -144,7 +144,20 @@ local function onHeroDied(entity, killer)
 		return
 	end
 	if MatchManager.Context and MatchManager.Context.Royale then
-		-- free for all: no respawn, everything the hero carried spills onto the ground
+		-- a planted revive cross: keep your gear, rise at the cross shortly
+		if getLoot().HasStandingCross(participant) then
+			participant.State = "Dead"
+			participant.RespawnAt = Util.Now() + Constants.Royale.REVIVE_DELAY
+			participant.DeathPosition = deathPosition
+			PlayerService.SetPlayerAttributes(participant)
+			Net.Notify(nil, string.format("%s was slain by %s - their cross still stands", participant.Name, describeKiller(killer)), "Info")
+			if participant.Player then
+				Net.Notify(participant.Player, "YOU FELL", "Warning", { Banner = true, Sub = string.format("Rising at your Revive Cross in %ds - unless it is destroyed", Constants.Royale.REVIVE_DELAY) })
+			end
+			MatchManager.Broadcast()
+			return
+		end
+		-- free for all: no respawn, everything the hero carried goes into a chest where they fell
 		participant.State = "Eliminated"
 		participant.RespawnAt = nil
 		getLoot().DropAll(participant, deathPosition)
@@ -416,6 +429,31 @@ function MatchManager.RunRoyaleMatch()
 	while MatchManager.State == STATE.ACTIVE and matchRunId == myRun do
 		task.wait(0.25)
 		local loopOk, loopErr = pcall(function()
+			-- revive crosses: rise at the cross, or be eliminated if it was destroyed meanwhile
+			local now = Util.Now()
+			for _, participant in ipairs(PlayerService.GetParticipants()) do
+				if participant.State == "Dead" and participant.RespawnAt and not participant.Spawning and now >= participant.RespawnAt then
+					participant.RespawnAt = nil
+					local crossPosition = Loot.ConsumeCross(participant)
+					if crossPosition then
+						participant.Spawning = true
+						task.spawn(function()
+							MatchManager.SpawnParticipant(participant, crossPosition + Vector3.new(2, 0.2, 0), false)
+							participant.Spawning = false
+						end)
+						Net.Notify(nil, participant.Name .. " RISES FROM THEIR REVIVE CROSS", "Buff")
+					else
+						participant.State = "Eliminated"
+						Loot.DropAll(participant, participant.DeathPosition or Vector3.zero)
+						table.insert(context.EliminationOrder, participant.Team)
+						PlayerService.SetPlayerAttributes(participant)
+						if participant.Player then
+							Net.Notify(participant.Player, "ELIMINATED", "Danger", { Banner = true, Sub = "Your revive cross was destroyed. Spectating." })
+						end
+					end
+					MatchManager.Broadcast()
+				end
+			end
 			local alive, last = Royale.CountAlive()
 			if alive <= 1 then
 				MatchManager.EndMatch(last and last.Team or nil)

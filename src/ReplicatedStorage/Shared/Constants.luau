@@ -138,8 +138,9 @@ Constants.Vision = {
 }
 
 -- Royale (18-player free-for-all battle royale) ------------------------------------------
--- No classes, no shop, no respawn: everyone lands as a Wanderer, loots skills and items
--- from ruins, and the play zone shrinks until one hero is left.
+-- No class pick, no shop: everyone lands as a Fighter, finds weapons (= classes) and items
+-- in supply chests, can be revived once by a planted cross, and the play zone shrinks
+-- until one hero is left.
 Constants.Royale = {
 	MAP_RADIUS = 420,
 	DEPLOY_TIME = 25, -- seconds to pick a landing spot on the map
@@ -148,8 +149,11 @@ Constants.Royale = {
 	START_RUINS = 34, -- loot ruins placed at match start
 	RUIN_HEALTH = 450,
 	RUIN_RESPAWN_INTERVAL = 50, -- a fresh ruin appears inside the zone this often
-	LOOT_PER_RUIN = 2,
-	SKILL_CHANCE = 0.3, -- chance a loot drop is a class skill instead of an item
+	LOOT_PER_RUIN = 2, -- items in the supply chest a ruin leaves behind
+	RUIN_WEAPON_CHANCE = 0.2, -- extra chance that chest also holds a weapon
+	PLAYERS_PER_START_WEAPON = 2, -- 18 players -> 9 weapon caches on the map at the start
+	REVIVE_DELAY = 6, -- seconds from death to rising again at your planted cross
+	CROSS_HEALTH = 450, -- enemies can smash a planted cross
 	ZONE_START_DELAY = 70, -- seconds before the first shrink starts
 	-- each phase: wait, then shrink over Shrink seconds to Radius (fraction of the map radius)
 	ZONE_PHASES = {
@@ -170,7 +174,10 @@ Constants.Loot = {
 	POTION_COOLDOWN = 8,
 	MAX_POTIONS = 5,
 	POTION_DROP_CHANCE = 0.45, -- per natural monster killed
-	LOOT_LIFETIME = 180, -- seconds before loot on the ground fades
+	LOOT_LIFETIME = 180, -- seconds before a loose potion fades
+	CHEST_LIFETIME = 300, -- seconds before a supply chest crumbles
+	CHEST_MERGE_RADIUS = 12, -- gear dropped this close to a chest goes into that chest
+	CHEST_REACH = 11, -- how close you must stay to use an open chest
 }
 
 -- Map --------------------------------------------------------------------------------

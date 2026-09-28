@@ -203,12 +203,10 @@ local function updateDynamic()
 		end
 		zoneRing("ZoneNext", Color3.fromRGB(245, 245, 255), zone.NextX, zone.NextZ, zone.NextRadius, 1)
 		zoneRing("Zone", Color3.fromRGB(190, 110, 255), zone.X, zone.Z, zone.Radius, 2)
-		for _, loot in ipairs(royale.Loot or {}) do
-			if loot.Kind ~= "Potion" then
-				local icon = acquire("Loot", diamondFactory(6))
-				icon.Position = toMap(loot.Position)
-				icon.BackgroundColor3 = loot.Kind == "Skill" and Color3.fromRGB(200, 150, 255) or Color3.fromRGB(255, 200, 90)
-			end
+		for _, chest in ipairs(royale.Loot or {}) do
+			local icon = acquire("Loot", diamondFactory(7))
+			icon.Position = toMap(chest.Position)
+			icon.BackgroundColor3 = Color3.fromRGB(255, 200, 90) -- supply chests
 		end
 	end
 	for _, fragment in ipairs(state.Fragments or {}) do
@@ -228,7 +226,8 @@ local function updateDynamic()
 			elseif ClientState.IsHeroVisible(model) then
 				local dot = acquire("Enemy", dotFactory(8, Color3.new(0, 0, 0)))
 				dot.Position = toMap(root.Position)
-				dot.BackgroundColor3 = Constants.GetTeamColor(team)
+				-- free for all: every other hero is simply red
+				dot.BackgroundColor3 = state.Royale and Color3.fromRGB(235, 60, 60) or Constants.GetTeamColor(team)
 			end
 		end
 	end

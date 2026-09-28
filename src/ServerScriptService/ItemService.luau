@@ -613,17 +613,37 @@ handlers.CrushingLeap = function(entity, ability, origin, aimPosition)
 	return true
 end
 
-handlers.SummonGolem = function(entity, ability, origin)
+-- Golem Heart: hurl the golem to a point (ranged). It lands with an area stun + damage,
+-- then fights whatever its summoner attacks (CreepService.thinkGolem).
+handlers.SummonGolem = function(entity, ability, origin, aimPosition)
 	local module = script.Parent:FindFirstChild("CreepService")
 	local creepService = module and require(module)
 	if not creepService or not creepService.SpawnGolem then
 		return false, "Golems are unavailable"
 	end
-	local ok, reason = creepService.SpawnGolem(entity, ability)
+	local offset = Util.Flat(aimPosition - origin)
+	if offset.Magnitude > (ability.Range or 28) then
+		offset = offset.Unit * (ability.Range or 28)
+	end
+	local point = CombatService.ClampToArena(Vector3.new(origin.X + offset.X, origin.Y, origin.Z + offset.Z))
+	CombatService.BreakStealth(entity)
+	Net.Effect("Cast", { Position = origin, Color = ability.Color })
+	local ok, reason = creepService.SpawnGolem(entity, ability, point)
 	if not ok then
 		return false, reason
 	end
-	Net.Effect("Explosion", { Position = origin, Radius = 6, Color = ability.Color })
+	-- the landing slam
+	Net.Effect("Explosion", { Position = point, Radius = ability.Radius or 9, Color = ability.Color })
+	Net.Effect("Shockwave", { Position = point, Radius = ability.Radius or 9, Color = ability.Color })
+	for _, victim in ipairs(enemiesInRadius(entity, point, ability.Radius or 9, true)) do
+		if ability.Damage then
+			CombatService.ApplyDamage(entity, victim, ability.Damage)
+		end
+		if victim.Alive and ability.Stun then
+			CombatService.Stun(victim, ability.Stun, entity)
+			Net.Effect("Stun", { Position = CombatService.GetPosition(victim), Duration = ability.Stun })
+		end
+	end
 	return true
 end
 

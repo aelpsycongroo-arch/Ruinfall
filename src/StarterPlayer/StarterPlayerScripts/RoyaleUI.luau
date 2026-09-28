@@ -12,6 +12,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local GuiService = game:GetService("GuiService")
+local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Constants = require(Shared:WaitForChild("Constants"))
@@ -113,26 +114,92 @@ function RoyaleUI.new(screen, clientState)
 	self.OutWarning = Label({ Text = "OUTSIDE THE ZONE - GET TO THE PURPLE RING", Font = FONTS.Title, TextSize = 24, TextColor3 = COLORS.Danger, TextXAlignment = Enum.TextXAlignment.Center, AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 134), Size = UDim2.fromOffset(700, 30), Visible = false, ZIndex = 7, Parent = overlay })
 	self.OutVignette = New("Frame", { Name = "StormTint", Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.fromRGB(120, 40, 200), BackgroundTransparency = 1, ZIndex = 5, Parent = overlay })
 
-	-- gear list with drop buttons (left edge)
-	local gear = Panel({ Name = "Gear", AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 10, 0.5, 0), Size = UDim2.fromOffset(250, 262), ZIndex = 6, Parent = overlay })
+	-- gear panel (left edge): weapon (= class), items with DROP, revive cross. It is also the
+	-- drop target when dragging loot out of a chest.
+	local ROW_H = 38
+	local gear = Panel({ Name = "Gear", AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 10, 0.5, 0), Size = UDim2.fromOffset(272, 36 + 9 * (ROW_H + 3) + 24), ZIndex = 6, Parent = overlay })
+	self.GearPanel = gear
+	self.GearHighlight = UITheme.Stroke(gear, COLORS.Success, 3, 1)
 	Label({ Text = "YOUR GEAR", Font = FONTS.Title, TextSize = 16, TextColor3 = COLORS.Gold, Position = UDim2.fromOffset(12, 8), Size = UDim2.new(1, -24, 0, 20), ZIndex = 7, Parent = gear })
 	self.GearRows = {}
 	local slots = {
-		{ Key = "Skill", Label = "Q" }, { Key = 1, Label = "E" }, { Key = 2, Label = "R" }, { Key = BOOT_SLOT, Label = "RMB" },
+		{ Key = "Weapon", Label = "WPN" }, { Key = 1, Label = "E" }, { Key = 2, Label = "R" }, { Key = BOOT_SLOT, Label = "RMB" },
 		{ Key = PASSIVE_BASE + 1, Label = "P1" }, { Key = PASSIVE_BASE + 2, Label = "P2" }, { Key = PASSIVE_BASE + 3, Label = "P3" },
+		{ Key = "Cross", Label = "\u{271D}" },
 	}
 	for index, slot in ipairs(slots) do
-		local y = 32 + (index - 1) * 32
-		local row = New("Frame", { Position = UDim2.fromOffset(8, y), Size = UDim2.new(1, -16, 0, 28), BackgroundColor3 = COLORS.PanelLight, BackgroundTransparency = 0.35, ZIndex = 7, Parent = gear })
+		local y = 32 + (index - 1) * (ROW_H + 3)
+		local row = New("Frame", { Position = UDim2.fromOffset(8, y), Size = UDim2.new(1, -16, 0, ROW_H), BackgroundColor3 = COLORS.PanelLight, BackgroundTransparency = 0.35, ZIndex = 7, Parent = gear })
 		UITheme.Corner(row, 4)
-		Label({ Text = slot.Label, Font = FONTS.Title, TextSize = 14, TextColor3 = COLORS.Gold, Position = UDim2.fromOffset(6, 4), Size = UDim2.fromOffset(34, 20), ZIndex = 8, Parent = row })
-		local name = Label({ Text = "-", Font = FONTS.Medium, TextSize = 13, Position = UDim2.fromOffset(42, 4), Size = UDim2.new(1, -110, 0, 20), TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 8, Parent = row })
-		local drop = Button({ Text = "DROP", Font = FONTS.Title, TextSize = 12, BackgroundColor3 = Color3.fromRGB(95, 45, 40), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -3, 0.5, 0), Size = UDim2.fromOffset(58, 22), ZIndex = 8, Parent = row }, function()
-			self.Remotes.LootRequest:FireServer("Drop", slot.Key)
+		Label({ Text = slot.Label, Font = FONTS.Title, TextSize = 14, TextColor3 = COLORS.Gold, Position = UDim2.fromOffset(6, 9), Size = UDim2.fromOffset(34, 20), ZIndex = 8, Parent = row })
+		local name = Label({ Text = "-", Font = FONTS.Bold, TextSize = 13, Position = UDim2.fromOffset(42, 2), Size = UDim2.new(1, -112, 0, 18), TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 8, Parent = row })
+		local sub = Label({ Text = "", Font = FONTS.Medium, TextSize = 11, TextColor3 = COLORS.Subtext, Position = UDim2.fromOffset(42, 19), Size = UDim2.new(1, -112, 0, 16), TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 8, Parent = row })
+		local buttonText = slot.Key == "Cross" and "PLANT" or "DROP"
+		local action = Button({ Text = buttonText, Font = FONTS.Title, TextSize = 12, BackgroundColor3 = slot.Key == "Cross" and Color3.fromRGB(50, 80, 55) or Color3.fromRGB(95, 45, 40), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -3, 0.5, 0), Size = UDim2.fromOffset(62, 24), ZIndex = 8, Parent = row }, function()
+			if slot.Key == "Cross" then
+				self.Remotes.LootRequest:FireServer("PlantCross")
+			elseif type(slot.Key) == "number" then
+				self.Remotes.LootRequest:FireServer("Drop", slot.Key)
+			end
 		end)
-		self.GearRows[index] = { Key = slot.Key, Name = name, Drop = drop }
+		self.GearRows[index] = { Key = slot.Key, Name = name, Sub = sub, Action = action }
 	end
-	Label({ Text = "F: take loot   H: drink potion", Font = FONTS.Medium, TextSize = 12, TextColor3 = COLORS.Subtext, Position = UDim2.fromOffset(12, 258 - 22), Size = UDim2.new(1, -24, 0, 16), ZIndex = 7, Parent = gear })
+	Label({ Text = "F: open chest   H: drink potion", Font = FONTS.Medium, TextSize = 12, TextColor3 = COLORS.Subtext, Position = UDim2.new(0, 12, 1, -22), Size = UDim2.new(1, -24, 0, 16), ZIndex = 7, Parent = gear })
+
+	-- Supply chest window: every entry with its short stats; drag an entry onto YOUR GEAR
+	-- (or tap it on touch screens) to take it.
+	local chestFrame = Panel({ Name = "Chest", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 60, 0.5, 0), Size = UDim2.fromOffset(420, 360), Visible = false, ZIndex = 20, Parent = screen })
+	self.ChestFrame = chestFrame
+	UITheme.MedievalPanel(chestFrame, true)
+	self.ChestTitle = Label({ Text = "SUPPLY CHEST", Font = FONTS.Title, TextSize = 20, TextColor3 = COLORS.Gold, Position = UDim2.fromOffset(14, 8), Size = UDim2.new(1, -60, 0, 24), ZIndex = 21, Parent = chestFrame })
+	Label({ Text = "Drag an item onto YOUR GEAR to take it. What it replaces goes back in the chest.", Font = FONTS.Medium, TextSize = 12, TextColor3 = COLORS.Subtext, TextWrapped = true, Position = UDim2.fromOffset(14, 32), Size = UDim2.new(1, -28, 0, 30), ZIndex = 21, Parent = chestFrame })
+	Button({ Text = "X", Font = FONTS.Title, TextSize = 16, BackgroundColor3 = Color3.fromRGB(95, 45, 40), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -8, 0, 8), Size = UDim2.fromOffset(30, 26), ZIndex = 22, Parent = chestFrame }, function()
+		self:CloseChest(true)
+	end)
+	self.ChestList = New("ScrollingFrame", { Name = "Entries", Position = UDim2.fromOffset(10, 66), Size = UDim2.new(1, -20, 1, -76), BackgroundTransparency = 1, ScrollBarThickness = 5, CanvasSize = UDim2.new(), ZIndex = 21, Parent = chestFrame })
+	New("UIListLayout", { Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder, Parent = self.ChestList })
+	self.DragGhost = Label({ Text = "", Font = FONTS.Bold, TextSize = 14, BackgroundColor3 = Color3.fromRGB(40, 32, 26), BackgroundTransparency = 0.1, TextXAlignment = Enum.TextXAlignment.Center, AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(200, 30), Visible = false, ZIndex = 50, Parent = screen })
+	UITheme.Corner(self.DragGhost, 5)
+	UITheme.Stroke(self.DragGhost, COLORS.Gold, 1.5, 0)
+	self.Screen = screen
+
+	self.Remotes.LootRequest.OnClientEvent:Connect(function(kind, payload)
+		if kind == "Chest" and type(payload) == "table" then
+			self:ShowChest(payload)
+		elseif kind == "ChestClosed" and type(payload) == "table" and self.OpenChestId == payload.Id then
+			self:CloseChest(false)
+		end
+	end)
+	-- drag release anywhere: drop onto the gear panel = take
+	UserInputService.InputEnded:Connect(function(input)
+		if not self.Dragging then
+			return
+		end
+		if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
+			return
+		end
+		local drag = self.Dragging
+		self.Dragging = nil
+		self.DragGhost.Visible = false
+		self.GearHighlight.Transparency = 1
+		local point = input.UserInputType == Enum.UserInputType.Touch and (Vector2.new(input.Position.X, input.Position.Y) + GuiService:GetGuiInset()) or UserInputService:GetMouseLocation()
+		local moved = (point - drag.Start).Magnitude
+		if self:OverGear(point) or (input.UserInputType == Enum.UserInputType.Touch and moved < 10) then
+			self.Remotes.LootRequest:FireServer("Take", drag.ChestId, drag.Index)
+		end
+	end)
+	RunService.RenderStepped:Connect(function()
+		if self.Dragging then
+			local point = self.Dragging.Touch and self.Dragging.Last or UserInputService:GetMouseLocation()
+			self.DragGhost.Position = UDim2.fromOffset(point.X, point.Y)
+			self.GearHighlight.Transparency = self:OverGear(point) and 0 or 0.6
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if self.Dragging and self.Dragging.Touch and input.UserInputType == Enum.UserInputType.Touch then
+			self.Dragging.Last = Vector2.new(input.Position.X, input.Position.Y) + GuiService:GetGuiInset()
+		end
+	end)
 
 	-- Potion widget (both modes) -------------------------------------------------------------
 	local potion = Button({ Name = "Potion", Text = "", BackgroundColor3 = Color3.fromRGB(70, 24, 30), AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 10, 1, -200), Size = UDim2.fromOffset(150, 46), Visible = false, ZIndex = 6, Parent = screen }, function()
@@ -260,7 +327,7 @@ function RoyaleUI:RenderPicks(royale)
 	for _, pick in ipairs(royale.Picks or {}) do
 		local marker = self.PickMarkers[pick.Id]
 		local mine = me ~= nil and pick.Id == me.Id
-		local color = mine and COLORS.Gold or Constants.GetTeamColor(pick.Team)
+		local color = mine and Color3.fromRGB(80, 220, 100) or Color3.fromRGB(235, 60, 60) -- you green, others red
 		if not marker then
 			local zone = circle(self.MapDynamic, 10, color, 0.75, 35)
 			UITheme.Stroke(zone, color, 1.5, 0.1)
@@ -288,6 +355,65 @@ function RoyaleUI:RenderPicks(royale)
 			self.PickMarkers[id] = nil
 		end
 	end
+end
+
+-- Supply chest -----------------------------------------------------------------------------------
+function RoyaleUI:OverGear(point)
+	local gear = self.GearPanel
+	if not gear or not self.Overlay.Visible then
+		return false
+	end
+	local position, size = gear.AbsolutePosition, gear.AbsoluteSize
+	return point.X >= position.X and point.X <= position.X + size.X and point.Y >= position.Y and point.Y <= position.Y + size.Y
+end
+
+function RoyaleUI:ShowChest(payload)
+	self.OpenChestId = payload.Id
+	local list = self.ChestList
+	for _, child in ipairs(list:GetChildren()) do
+		if child:IsA("GuiObject") then
+			child:Destroy()
+		end
+	end
+	self.ChestTitle.Text = string.format("SUPPLY CHEST  (%d)", #payload.Entries)
+	for order, entry in ipairs(payload.Entries) do
+		local row = New("TextButton", { Name = "Entry", Text = "", AutoButtonColor = false, LayoutOrder = order, Size = UDim2.new(1, -8, 0, 50), BackgroundColor3 = COLORS.PanelLight, BackgroundTransparency = 0.2, ZIndex = 22, Parent = list })
+		UITheme.Corner(row, 5)
+		UITheme.Stroke(row, entry.Color or COLORS.Gold, 1.5, 0.3)
+		local icon = New("Frame", { Position = UDim2.fromOffset(5, 5), Size = UDim2.fromOffset(40, 40), BackgroundColor3 = (entry.Color or COLORS.Gold):Lerp(Color3.new(0, 0, 0), 0.5), ZIndex = 23, Parent = row })
+		UITheme.Corner(icon, 5)
+		if entry.Icon and entry.Icon ~= "" then
+			New("ImageLabel", { BackgroundTransparency = 1, Image = entry.Icon, Size = UDim2.fromScale(1, 1), ZIndex = 24, Parent = icon })
+		else
+			Label({ Text = entry.Kind == "Potion" and "+" or string.sub(entry.Name, 1, 1), Font = FONTS.Title, TextSize = 22, TextXAlignment = Enum.TextXAlignment.Center, Size = UDim2.fromScale(1, 1), ZIndex = 24, Parent = icon })
+		end
+		local slot = entry.Slot == "Weapon" and "WEAPON" or entry.Slot == "Boots" and "BOOTS" or entry.Slot == "Passive" and "PASSIVE" or entry.Slot == "Potion" and "POTION" or "MYTHIC"
+		Label({ Text = entry.Name, Font = FONTS.Bold, TextSize = 14, TextColor3 = entry.Color or COLORS.Text, Position = UDim2.fromOffset(52, 5), Size = UDim2.new(1, -120, 0, 18), TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 23, Parent = row })
+		Label({ Text = slot, Font = FONTS.Title, TextSize = 11, TextColor3 = COLORS.Subtext, TextXAlignment = Enum.TextXAlignment.Right, AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -8, 0, 6), Size = UDim2.fromOffset(70, 14), ZIndex = 23, Parent = row })
+		Label({ Text = entry.Summary or "", Font = FONTS.Medium, TextSize = 12, TextColor3 = COLORS.Text, Position = UDim2.fromOffset(52, 25), Size = UDim2.new(1, -60, 0, 18), TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 23, Parent = row })
+		row.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+				local touch = input.UserInputType == Enum.UserInputType.Touch
+				local start = touch and (Vector2.new(input.Position.X, input.Position.Y) + GuiService:GetGuiInset()) or UserInputService:GetMouseLocation()
+				self.Dragging = { ChestId = payload.Id, Index = entry.Index, Touch = touch, Start = start, Last = start }
+				self.DragGhost.Text = entry.Name
+				self.DragGhost.TextColor3 = entry.Color or COLORS.Text
+				self.DragGhost.Visible = true
+			end
+		end)
+	end
+	list.CanvasSize = UDim2.fromOffset(0, #payload.Entries * 55)
+	self.ChestFrame.Visible = true
+end
+
+function RoyaleUI:CloseChest(tellServer)
+	if tellServer and self.OpenChestId then
+		self.Remotes.LootRequest:FireServer("CloseChest")
+	end
+	self.OpenChestId = nil
+	self.ChestFrame.Visible = false
+	self.Dragging = nil
+	self.DragGhost.Visible = false
 end
 
 -- Update ------------------------------------------------------------------------------------
@@ -347,25 +473,42 @@ function RoyaleUI:Update(state)
 		-- gear rows
 		if me then
 			for _, row in ipairs(self.GearRows) do
-				local text = nil
-				if row.Key == "Skill" then
-					local ability = me.Skill ~= "" and ClassDefinitions.GetAbility("Wanderer", me.Skill) or nil
-					text = ability and ability.Name or nil
+				local item, text, sub = nil, nil, ""
+				if row.Key == "Weapon" then
+					local classDef = ClassDefinitions.Get(me.ClassKey)
+					text = ClassDefinitions.GetWeaponName(me.ClassKey)
+					sub = classDef and string.format("%s  |  Q %s", classDef.DisplayName, classDef.Ability and classDef.Ability.Name or "-") or ""
+				elseif row.Key == "Cross" then
+					local crossState = me.CrossState or ""
+					text = "Revive Cross"
+					sub = crossState == "Held" and "Plant it - if you fall, you rise there" or crossState == "Planted" and "Planted - F at the cross to pick it up"
+						or crossState == "Used" and "Used" or crossState == "Lost" and "Destroyed" or ""
 				elseif row.Key == 1 or row.Key == 2 then
-					local item = ItemDefinitions.GetItem(me.Mythics and me.Mythics[row.Key])
-					text = item and item.Name or nil
+					item = ItemDefinitions.GetItem(me.Mythics and me.Mythics[row.Key])
 				elseif row.Key == BOOT_SLOT then
-					local item = ItemDefinitions.GetItem(me.Boots)
-					text = item and item.Name or nil
+					item = ItemDefinitions.GetItem(me.Boots)
 				else
-					local item = ItemDefinitions.GetItem(me.Passives and me.Passives[row.Key - PASSIVE_BASE])
-					text = item and item.Name or nil
+					item = ItemDefinitions.GetItem(me.Passives and me.Passives[row.Key - PASSIVE_BASE])
+				end
+				if item then
+					text = item.Name
+					sub = ItemDefinitions.GetShortSummary(item)
 				end
 				row.Name.Text = text or "- empty -"
 				row.Name.TextColor3 = text and COLORS.Text or COLORS.Subtext
-				row.Drop.Visible = text ~= nil
+				row.Sub.Text = sub
+				if row.Key == "Weapon" then
+					row.Action.Visible = false -- swap weapons from chests; the old one goes back in
+				elseif row.Key == "Cross" then
+					row.Action.Visible = me.CrossState == "Held"
+				else
+					row.Action.Visible = item ~= nil
+				end
 			end
 		end
+	end
+	if not (royale and inMatch) and self.OpenChestId then
+		self:CloseChest(false)
 	end
 
 	-- potions (both modes)
@@ -385,7 +528,23 @@ function RoyaleUI:Tick()
 		outside = (Vector3.new(root.Position.X, 0, root.Position.Z) - Vector3.new(zone.X, 0, zone.Z)).Magnitude > zone.Radius
 	end
 	self.OutWarning.Visible = outside
-	self.OutVignette.BackgroundTransparency = outside and (0.8 + 0.06 * math.sin(os.clock() * 5)) or 1
+	self.OutVignette.BackgroundTransparency = outside and (0.72 + 0.08 * math.sin(os.clock() * 5)) or 1
+	-- inside the storm the whole world turns purple and washed out (client-only effect)
+	local tint = self.StormTint
+	if not tint or not tint.Parent then
+		tint = Instance.new("ColorCorrectionEffect")
+		tint.Name = "RoyaleStormTint"
+		tint.Enabled = false
+		tint.Parent = game:GetService("Lighting")
+		self.StormTint = tint
+	end
+	tint.Enabled = outside
+	if outside then
+		tint.TintColor = Color3.fromRGB(205, 160, 255)
+		tint.Saturation = -0.45
+		tint.Contrast = 0.1
+		tint.Brightness = -0.05
+	end
 end
 
 return RoyaleUI

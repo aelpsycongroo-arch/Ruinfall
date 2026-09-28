@@ -161,54 +161,24 @@ ClassDefinitions.Classes = {
 	},
 }
 
--- Royale: nobody picks a class. Everyone lands as a Wanderer (balanced melee stats, no Q)
--- and loots class skills from ruins. Not in Order, so it never shows in the class picker.
-ClassDefinitions.Classes.Wanderer = {
-	Key = "Wanderer",
-	DisplayName = "Wanderer",
-	Role = "Royale survivor",
-	Icon = "W",
-	Color = Color3.fromRGB(205, 185, 150),
-	SecondaryColor = Color3.fromRGB(60, 50, 40),
-	Ratings = { Health = 3, Damage = 3, Range = 1, Speed = 3, Armor = 2 },
-	MaxHealth = 800,
-	Armor = 22,
-	MoveSpeed = 18,
-	HealthRegen = 0.01,
-	AttackType = "Melee",
-	AttackDamage = 40,
-	MagicPower = 30,
-	AttackRange = 8,
-	AttackCooldown = 0.7,
-	MeleeArc = 100,
-	Cleave = false,
-	Ability = nil, -- filled by a looted skill (see ClassDefinitions.WithSkill)
-	LookClass = "Fighter", -- gear, weapon mesh and animations are borrowed from this class
+-- Royale weapons: every hero starts with the Fighter's sword; picking up another class's
+-- weapon turns the hero into that class (its stats, basic attack and Q ability).
+ClassDefinitions.Weapons = {
+	Assassin = "Twin Shadow Daggers",
+	Mage = "Arcane Staff",
+	Marksman = "Hunter's Longbow",
+	Tank = "Tower Shield & Mace",
+	Fighter = "Soldier's Sword",
 }
 
--- The Q skill a hero actually has: the class ability, or in Royale the looted skill
--- (skillKey = the class whose ability was looted).
-function ClassDefinitions.GetAbility(classKey, skillKey)
-	local skillClass = skillKey and skillKey ~= "" and ClassDefinitions.Classes[skillKey]
-	if skillClass then
-		return skillClass.Ability
-	end
-	local classDef = ClassDefinitions.Classes[classKey]
-	return classDef and classDef.Ability or nil
+function ClassDefinitions.GetWeaponName(classKey)
+	return ClassDefinitions.Weapons[classKey] or (classKey .. " weapon")
 end
 
--- A class table carrying a looted skill: Wanderer stats + the skill class's Q ability.
-function ClassDefinitions.WithSkill(classKey, skillKey)
-	local base = ClassDefinitions.Classes[classKey]
-	local skillClass = skillKey and ClassDefinitions.Classes[skillKey]
-	if not base or not skillClass or skillClass == base then
-		return base
-	end
-	local merged = table.clone(base)
-	merged.Ability = skillClass.Ability
-	merged.SkillKey = skillKey
-	merged.Color = skillClass.Color
-	return merged
+-- The Q skill of a class (kept as a helper for UI code)
+function ClassDefinitions.GetAbility(classKey)
+	local classDef = ClassDefinitions.Classes[classKey]
+	return classDef and classDef.Ability or nil
 end
 
 function ClassDefinitions.Get(classKey)

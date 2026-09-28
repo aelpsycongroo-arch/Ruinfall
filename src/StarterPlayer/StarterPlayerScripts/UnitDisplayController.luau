@@ -26,12 +26,19 @@ local KIND_CONFIG = {
 	Flag = { Tag = "RF_Flag", Width = 150, BarHeight = 10, Offset = 5, ShowName = true },
 	Ruin = { Tag = "RF_Ruin", Width = 120, BarHeight = 9, Offset = 6, ShowName = true },
 	Creep = { Tag = "RF_Creep", Width = 54, BarHeight = 5, Offset = 2.8, ShowName = false },
+	Cross = { Tag = "RF_Cross", Width = 90, BarHeight = 6, Offset = 4, ShowName = true }, -- Royale revive cross
 }
+-- Free for all (Royale) has no team colours: you are green, everyone else is red
+local SELF_GREEN = Color3.fromRGB(80, 220, 100)
+local ENEMY_RED = Color3.fromRGB(235, 60, 60)
 
 -- State
 local UnitDisplayController = {}
 local ClientState = nil
 local FogController = nil
+local function isRoyale()
+	return ClientState and ClientState.Game and ClientState.Game.Royale ~= nil
+end
 local units = {} -- [model] = record
 local barFolder = nil
 local accumulator = 0
@@ -309,6 +316,9 @@ local function updateHero(record, now, myTeam)
 		local health = model:GetAttribute("Health") or 0
 		local maxHealth = math.max(1, model:GetAttribute("MaxHealth") or 1)
 		local teamColor = Constants.GetTeamColor(team)
+		if isRoyale() then
+			teamColor = isMine and SELF_GREEN or ENEMY_RED
+		end
 		record.Bar.Set(health / maxHealth, teamColor) -- every hero's bar (yours too) is its team's colour
 		record.Shield.Size = UDim2.fromScale(math.clamp((model:GetAttribute("Shield") or 0) / maxHealth, 0, 1), 0.45)
 		if record.Mana then
@@ -345,6 +355,17 @@ local function updateHero(record, now, myTeam)
 	end
 	updateAura(record, root, showBar and auraColor or nil)
 	updateBubble(record, root, showBar and (model:GetAttribute("Shield") or 0) or 0)
+	-- the ground ring under every hero follows the same green / red rule in Royale (local only)
+	if isRoyale() then
+		local ring = record.TeamRing
+		if not ring or ring.Parent == nil then
+			ring = model:FindFirstChild("TeamRing", true)
+			record.TeamRing = ring
+		end
+		if ring and ring:IsA("BasePart") then
+			ring.Color = isMine and SELF_GREEN or ENEMY_RED
+		end
+	end
 end
 
 local function updateObjective(record)
@@ -369,6 +390,12 @@ local function updateObjective(record)
 	elseif record.Kind == "Monster" then
 		record.Billboard.Enabled = not dead
 		record.Bar.Set(health / maxHealth, Color3.fromRGB(235, 120, 60))
+	elseif record.Kind == "Cross" then
+		local mine = model:GetAttribute("Team") == ClientState.GetMyTeam()
+		record.Billboard.Enabled = not dead
+		record.Bar.Set(health / maxHealth, mine and SELF_GREEN or ENEMY_RED)
+		record.NameLabel.Text = mine and "YOUR REVIVE CROSS" or string.upper((model:GetAttribute("OwnerName") or "?") .. "'S CROSS")
+		record.NameLabel.TextColor3 = mine and SELF_GREEN or ENEMY_RED
 	elseif record.Kind == "Ruin" then
 		record.Billboard.Enabled = not dead
 		record.Bar.Set(health / maxHealth, COLORS.Gold)

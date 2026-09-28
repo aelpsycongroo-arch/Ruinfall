@@ -133,13 +133,7 @@ local function getSlotInfo(key)
 		if not classDef then
 			return nil
 		end
-		-- Royale: the Q skill is the looted one (none yet = no Q button content)
-		local skillClass = me.Skill and me.Skill ~= "" and ClassDefinitions.Get(me.Skill) or nil
-		local ability = ClassDefinitions.GetAbility(me.ClassKey, me.Skill)
-		if not ability then
-			return nil
-		end
-		classDef = skillClass or classDef
+		local ability = classDef.Ability
 		return {
 			Name = ability.Name, Color = classDef.Color, Cooldown = ability.Cooldown,
 			Remaining = ((character and character:GetAttribute("AbilityReadyAt")) or 0) - now,

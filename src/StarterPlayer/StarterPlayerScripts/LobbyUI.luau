@@ -86,7 +86,7 @@ function LobbyUI.new(screen, clientState)
 
 	-- Free for all servers (the Shattered Expanse gate) have one fixed mode
 	self.RoyaleModeInfo = Label({
-		Text = "FREE FOR ALL\n\n18 players - every hero for themselves.\nNo classes, no shop: break ruins to loot skills and gear.\nThe zone shrinks - last one standing wins.",
+		Text = "FREE FOR ALL\n\n18 players - every hero for themselves.\nNo class pick, no shop: find weapons and gear on the map.\nThe zone shrinks - last one standing wins.",
 		Font = FONTS.Medium, TextSize = 14, TextColor3 = COLORS.Text, TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top,
 		Position = UDim2.fromOffset(18, 48), Size = UDim2.new(1, -36, 0, 280), Visible = false, Parent = modePanel,
 	})
@@ -171,7 +171,7 @@ function LobbyUI.new(screen, clientState)
 	end
 	self.ClassPanel = classPanel
 	self.RoyaleClassInfo = Label({
-		Text = "NO CLASSES\n\nEveryone lands as a Wanderer.\n\nBreak ruins to find class skills (Q) and items (E / R, boots, passives). Press F to take loot, DROP gear you don't want, and drink health potions from monsters with H.",
+		Text = "NO CLASS PICK\n\nEveryone lands as a Fighter.\n\nWeapon caches hold the other classes' weapons - take one to become that class (Mage staff = Mage stats + Arcane Burst).\n\nRuins leave supply chests: press F to open, drag gear onto YOUR GEAR. Plant your Revive Cross - fall while it stands and you rise there. Monsters drop health potions (H).",
 		Font = FONTS.Medium, TextSize = 15, TextColor3 = COLORS.Text, TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top,
 		Position = UDim2.fromOffset(18, 50), Size = UDim2.new(1, -36, 0, 380), Visible = false, Parent = classPanel,
 	})

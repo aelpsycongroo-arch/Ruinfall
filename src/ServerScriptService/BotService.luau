@@ -167,7 +167,7 @@ local function tryAbility(brain, target, isHero)
 	end
 	local ability = entity.Class.Ability
 	if not ability then
-		return -- Royale Wanderer without a looted skill
+		return -- no Q ability
 	end
 	local position = CombatService.GetPosition(entity)
 	local targetPosition = CombatService.GetPosition(target)
@@ -444,34 +444,42 @@ local function royaleThink(brain)
 		engage(brain, enemy)
 		return
 	end
-	-- 4. loot on the ground (a skill first if we have none)
-	local wantsSkill = not classDef.Ability
-	local loot = wantsSkill and Loot.FindNearest(position, 90, function(l)
-		return l.Kind == "Skill" and insideZone(l.Position)
-	end) or nil
-	loot = loot or Loot.FindNearest(position, 60, function(l)
-		return insideZone(l.Position) and (l.Kind ~= "Potion" or (participant.Potions or 0) < Constants.Loot.MAX_POTIONS)
+	-- 4. plant the revive cross once the landing rush is over (somewhere quiet)
+	if participant.CrossState == "Held" and now - (brain.SpawnedAt or now) > 25 then
+		Loot.PlantCross(participant)
+	end
+	-- 5. supply chests (weapons first while still a Fighter) and loose potions
+	local chest = Loot.FindNearestChest(position, participant.ClassKey == "Fighter" and 160 or 70, function(c)
+		return c.Id ~= participant.BotSkipChest and insideZone(c.Position)
 	end)
-	if loot then
+	if chest then
 		setState(brain, "Loot")
-		moveTo(brain, loot.Position)
+		moveTo(brain, chest.Position)
 		return
 	end
-	-- 5. break a ruin
+	if (participant.Potions or 0) < Constants.Loot.MAX_POTIONS then
+		local potion = Loot.FindNearestPotion(position, 50)
+		if potion and insideZone(potion.Position) then
+			setState(brain, "Potion")
+			moveTo(brain, potion.Position)
+			return
+		end
+	end
+	-- 6. break a ruin
 	local ruin = nearestRuin(position, 110)
 	if ruin and insideZone(ruin.Position) then
 		setState(brain, "Ruin")
 		attackObjective(brain, ruin.Entity)
 		return
 	end
-	-- 6. farm a camp for potions
+	-- 7. farm a camp for potions
 	if healthRatio > 0.6 then
 		local camp = nearestAliveCamp(position, 80)
 		if camp and insideZone(camp.Position) and farmCamp(brain, camp) then
 			return
 		end
 	end
-	-- 7. roam inside the zone, drifting toward where it will shrink
+	-- 8. roam inside the zone, drifting toward where it will shrink
 	if now >= brain.StrategyUntil or not insideZone(brain.RoamPoint) or Util.FlatDistance(position, brain.RoamPoint) < 8 then
 		brain.StrategyUntil = now + random:NextNumber(8, 15)
 		local target = zone and zone.NextCenter or center
@@ -504,7 +512,7 @@ local function think(brain)
 		setState(brain, "Stunned")
 		return
 	end
-	if entity.ClassKey == "Wanderer" then
+	if royaleModules().Active then
 		return royaleThink(brain) -- free-for-all battle royale bots
 	end
 	local difficulty = brain.Difficulty
@@ -710,6 +718,7 @@ function BotService.Attach(participant, entity)
 		StuckTime = 0,
 		UnstickUntil = 0,
 		State = "Spawned",
+		SpawnedAt = Util.Now(),
 	}
 	if Constants.DEBUG_MODE and entity.Model:FindFirstChild("Head") then
 		local billboard = Instance.new("BillboardGui")

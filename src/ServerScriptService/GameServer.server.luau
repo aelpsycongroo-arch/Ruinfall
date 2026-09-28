@@ -306,7 +306,7 @@ Net.Get("AbilityRequest").OnServerEvent:Connect(function(player, slot, aimPositi
 end)
 
 -- Health potions (both modes) and dropping unwanted gear (Royale)
-Net.Get("LootRequest").OnServerEvent:Connect(function(player, action, value)
+Net.Get("LootRequest").OnServerEvent:Connect(function(player, action, value, extra)
 	if not allowRequest(player) or type(action) ~= "string" or MatchManager.State ~= STATE.ACTIVE then
 		return
 	end
@@ -317,8 +317,17 @@ Net.Get("LootRequest").OnServerEvent:Connect(function(player, action, value)
 	local ok, reason
 	if action == "UsePotion" then
 		ok, reason = LootService.UsePotion(participant)
-	elseif action == "Drop" and (value == "Skill" or type(value) == "number") then
+	elseif action == "Drop" and type(value) == "number" then
 		ok, reason = LootService.Drop(participant, value)
+	elseif action == "OpenChest" and type(value) == "string" then
+		ok = LootService.OpenChest(player, value)
+	elseif action == "CloseChest" then
+		LootService.CloseChest(player)
+		ok = true
+	elseif action == "Take" and type(value) == "string" and type(extra) == "number" then
+		ok, reason = LootService.Take(participant, value, math.floor(extra))
+	elseif action == "PlantCross" then
+		ok, reason = LootService.PlantCross(participant)
 	end
 	if not ok and reason then
 		Net.Notify(player, reason, "Warning")

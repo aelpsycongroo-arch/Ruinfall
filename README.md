@@ -36,7 +36,7 @@ The Ruinfall Hall has one gate per game mode:
 | Gate | Mode | What it is |
 |------|------|-----------|
 | **Crater Arena** | 2 / 4 / 6 Team | The classic team battle: classes, shop, flags, minion waves. The arena sits in an impact crater (cosmetic rim and scorch marks; the layout is unchanged). |
-| **Shattered Expanse** | Free For All (`Royale`) | 18 players, each on their own. Pick a landing spot on the map (a pick blocks the area around it for others), no classes or shop. Break ruins for skills (Q) and items, drop gear you don't want, and stay inside the shrinking zone. Last one standing wins. |
+| **Shattered Expanse** | Free For All (`Royale`) | 18 players, each on their own (you see yourself green, everyone else red). Pick a landing spot on the map (a pick blocks the area around it for others). Everyone starts as a Fighter; weapon caches (one per two players) turn you into another class. Broken ruins and fallen heroes leave supply chests: press F, drag gear onto your gear panel. Plant your Revive Cross to rise once after dying. Stay inside the shrinking zone - last one standing wins. |
 
 Natural monsters drop **health potions** in both modes (walk over to collect, press **H** to drink).
 

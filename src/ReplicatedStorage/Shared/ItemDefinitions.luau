@@ -209,10 +209,10 @@ ItemDefinitions.Abilities = {
 	},
 	-- Any class -------------------------------------------------------------------
 	SummonGolem = {
-		Id = "SummonGolem", Name = "Summon Golem", Targeting = "Self",
-		Cooldown = 40, Duration = 20,
+		Id = "SummonGolem", Name = "Summon Golem", Targeting = "Point",
+		Cooldown = 40, Duration = 20, Range = 28, Radius = 9, Stun = 1.4, Damage = { AD = 1.2 },
 		Color = Color3.fromRGB(150, 200, 120),
-		Summary = "Raise a stone golem that guards you and fights nearby enemies, then crumbles.",
+		Summary = "Hurl a stone golem to the target point: it crashes down, damaging and stunning every enemy within 9 studs for 1.4 sec, then fights whatever you attack.",
 	},
 
 	-- Boot skills (right mouse). Each class has 5 boots: crowd control, attack speed,
@@ -357,7 +357,7 @@ ItemDefinitions.Abilities = {
 -- Its health and hit damage scale with the SUMMONER's stats at cast time.
 ItemDefinitions.Golem = {
 	MaxHealth = { HP = 1.0 }, Armor = 30, Damage = { AD = 1.1 }, AttackCooldown = 1.3, AttackRange = 6,
-	AggroRange = 18, LeashRange = 22, MoveSpeed = 15, Lifetime = 20,
+	AggroRange = 24, LeashRange = 45, MoveSpeed = 17, Lifetime = 20,
 	KillReward = 25, -- gold for the enemy hero who destroys it
 }
 
@@ -947,6 +947,55 @@ local STAT_LABELS = {
 	MagicPower = "Magic Power", Mana = "Mana", CooldownReduction = "Cooldown Reduction", CritChance = "Critical Chance",
 	Lifesteal = "Lifesteal", MagicDefense = "Magic Defense", MoveSpeedPercent = "Movement Speed",
 }
+
+-- Short one-line summary for loot (chests / drops): the two biggest stats + the effect.
+-- e.g. "+22 AD  +150 HP  |  Shadow Dash (E/R)"
+local SHORT_STATS = {
+	AttackDamage = { "AD", 1 }, MagicPower = { "MP", 1 }, MaxHealth = { "HP", 0.12 }, Armor = { "Armor", 1 },
+	AttackSpeed = { "Atk Spd", 60, true }, MoveSpeed = { "Speed", 5 }, CritChance = { "Crit", 60, true },
+	Lifesteal = { "Lifesteal", 60, true }, CooldownReduction = { "CDR", 60, true }, Mana = { "Mana", 0.08 },
+	MagicDefense = { "M.Def", 1 }, MoveSpeedPercent = { "Speed", 60, true }, HealthRegen = { "Regen", 1000, true },
+}
+
+function ItemDefinitions.GetShortStats(item)
+	local ranked = {}
+	for stat, value in pairs(item and item.Stats or {}) do
+		local info = SHORT_STATS[stat]
+		if info and value ~= 0 then
+			table.insert(ranked, { Weight = math.abs(value) * info[2], Text = info[3] and string.format("+%d%% %s", math.floor(value * 100 + 0.5), info[1]) or string.format("+%d %s", math.floor(value + 0.5), info[1]) })
+		end
+	end
+	table.sort(ranked, function(a, b)
+		return a.Weight > b.Weight
+	end)
+	local parts = {}
+	for index = 1, math.min(2, #ranked) do
+		table.insert(parts, ranked[index].Text)
+	end
+	return table.concat(parts, "  ")
+end
+
+function ItemDefinitions.GetShortEffect(item)
+	if not item then
+		return ""
+	end
+	if item.SlotType == "Passive" then
+		return item.Passive and item.Passive.Name or ""
+	end
+	local ability = item.Ability and ItemDefinitions.Abilities[item.Ability]
+	if not ability then
+		return ""
+	end
+	return string.format("%s (%s)", ability.Name, item.SlotType == "Boots" and "Right Mouse" or "E/R")
+end
+
+function ItemDefinitions.GetShortSummary(item)
+	local stats, effect = ItemDefinitions.GetShortStats(item), ItemDefinitions.GetShortEffect(item)
+	if stats ~= "" and effect ~= "" then
+		return stats .. "  |  " .. effect
+	end
+	return stats ~= "" and stats or effect
+end
 
 -- Tooltip lines built from the live numbers above: { { Label, Value }, ... }
 -- stats (optional): { AD, HP, Armor } of the viewing hero, to show live values

@@ -128,7 +128,7 @@ function PlayerService.SetPlayerAttributes(participant)
 	player:SetAttribute("RespawnAt", participant.RespawnAt or 0)
 	player:SetAttribute("Gold", participant.Stats.Gold or 0)
 	player:SetAttribute("Potions", participant.Potions or 0)
-	player:SetAttribute("Skill", participant.Skill or "")
+	player:SetAttribute("CrossState", participant.CrossState or "")
 end
 
 -- Lobby -------------------------------------------------------------------
@@ -139,13 +139,14 @@ local SLOT_SPREAD = {
 	[6] = { { 1 }, { 1, 4 }, { 1, 3, 5 }, { 1, 2, 4, 5 }, { 1, 2, 3, 4, 5 }, { 1, 2, 3, 4, 5, 6 } },
 }
 
--- Royale: free for all - every participant is its own team (1..18), everyone a Wanderer
+-- Royale: free for all - every participant is its own team (1..18), everyone starts as a
+-- Fighter (other classes come from weapons found on the map)
 local function assignRoyaleTeams()
 	local activeTeams = {}
 	for index, participant in ipairs(PlayerService.GetParticipants()) do
 		participant.Team = index
 		participant.ManualTeam = false
-		participant.ClassKey = "Wanderer"
+		participant.ClassKey = "Fighter"
 		table.insert(activeTeams, index)
 		PlayerService.SetPlayerAttributes(participant)
 	end
@@ -271,14 +272,7 @@ function PlayerService.SetMode(mode)
 	if locked and Constants.IsRoyale(locked) ~= Constants.IsRoyale(mode) then
 		return false
 	end
-	-- leaving Royale: Wanderers become Fighters again (the default class)
-	if Constants.IsRoyale(PlayerService.Mode) and not Constants.IsRoyale(mode) then
-		for _, participant in ipairs(PlayerService.Participants) do
-			if participant.ClassKey == "Wanderer" then
-				participant.ClassKey = participant.IsBot and ClassDefinitions.Order[math.random(1, #ClassDefinitions.Order)] or "Fighter"
-			end
-		end
-	end
+
 	PlayerService.Mode = mode
 	-- Clear manual team choices since the available teams changed
 	for _, participant in ipairs(PlayerService.Participants) do
@@ -303,7 +297,7 @@ end
 
 function PlayerService.SetClass(player, classKey)
 	local participant = PlayerService.GetParticipantByPlayer(player)
-	if not participant or not ClassDefinitions.IsValid(classKey) or Constants.IsRoyale(PlayerService.Mode) or classKey == "Wanderer" then
+	if not participant or not ClassDefinitions.IsValid(classKey) or Constants.IsRoyale(PlayerService.Mode) then
 		return false
 	end
 	participant.ClassKey = classKey
@@ -381,8 +375,8 @@ function PlayerService.SpawnHero(participant, position, lookAt)
 		CharacterFactory.PrepareHumanoid(model, isAvatar)
 	end
 
-	local classDef = ClassDefinitions.Get(participant.ClassKey)
-	CharacterFactory.ApplyClassLook(model, classDef and classDef.LookClass or participant.ClassKey, teamColor, isAvatar)
+	CharacterFactory.ApplyClassLook(model, participant.ClassKey, teamColor, isAvatar)
+	participant.AvatarLook = isAvatar -- Royale weapon swaps re-dress the hero
 	local spawnPosition = position + Vector3.new(0, 3.4, 0)
 	local spawnCFrame = CFrame.lookAt(spawnPosition, Vector3.new(lookAt.X, spawnPosition.Y, lookAt.Z))
 	model:PivotTo(spawnCFrame)
@@ -459,7 +453,8 @@ function PlayerService.ResetForLobby()
 		participant.PassiveStacks = {} -- per-match stacking passives, e.g. SoulHarvest = +HP (PassiveService)
 		participant.ItemReadyAt = {} -- [itemId] = server time the item ability is ready
 		participant.Potions = 0 -- health potions carried (monster drops)
-		participant.Skill = nil -- Royale: looted Q skill (a class key)
+		participant.CrossState = nil -- Royale revive cross: "Held" / "Planted" / "Used" / "Lost"
+		participant.Cross = nil
 	end
 	-- Admit spectators (late joiners); humans take priority over bots
 	for _, participant in ipairs(table.clone(PlayerService.Participants)) do
@@ -585,7 +580,7 @@ function PlayerService.Serialize()
 			PassiveStacks = participant.PassiveStacks or {},
 			WarBandActive = participant.WarBandActive or 0,
 			Potions = participant.Potions or 0,
-			Skill = participant.Skill or "",
+			CrossState = participant.CrossState or "",
 		})
 	end
 	return list

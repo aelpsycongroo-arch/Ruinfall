@@ -118,7 +118,7 @@ function AbilityService.Use(entity, aimPosition)
 		return false
 	end
 	if not entity.Class.Ability then
-		return false, "No skill yet - break ruins to find one" -- Royale Wanderer
+		return false, "No ability"
 	end
 	-- Q costs mana when the class ability sets ManaCost (Mage Arcane Burst: 80); spent only if the cast succeeds
 	local manaCost = entity.Class.Ability.ManaCost or 0

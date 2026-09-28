@@ -27,7 +27,7 @@ local function getPlayerService()
 end
 
 -- Constants
-local TAGS = { Hero = "RF_Hero", Monster = "RF_Monster", Flag = "RF_Flag", Ruin = "RF_Ruin", Creep = "RF_Creep" }
+local TAGS = { Hero = "RF_Hero", Monster = "RF_Monster", Flag = "RF_Flag", Ruin = "RF_Ruin", Creep = "RF_Creep", Cross = "RF_Cross" }
 -- Kinds that count as "attacking units" (can receive reflected damage)
 local UNIT_KINDS = { Hero = true, Monster = true, Creep = true }
 local BUFFS = CombatDefinitions.Buffs
@@ -289,9 +289,6 @@ function CombatService.CreateHero(participant, model, classKey)
 	local classDef = ClassDefinitions.Get(classKey)
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	local shopBonuses = CombatService.ComputeShopBonuses(participant)
-	if participant.Skill and participant.Skill ~= "" then
-		classDef = ClassDefinitions.WithSkill(classKey, participant.Skill) -- Royale: looted Q skill
-	end
 	local entity = {
 		Kind = "Hero",
 		Team = participant.Team,
@@ -323,8 +320,7 @@ function CombatService.CreateHero(participant, model, classKey)
 	}
 	applyExtraStats(entity, shopBonuses, true)
 	CombatService.Register(entity)
-	-- LookClass: Royale Wanderers borrow the Fighter's gear / animations on the client
-	model:SetAttribute("Class", ClassDefinitions.Get(classKey).LookClass or classKey)
+	model:SetAttribute("Class", classKey)
 	model:SetAttribute("ParticipantId", participant.Id)
 	model:SetAttribute("DisplayName", participant.Name)
 	model:SetAttribute("IsBot", participant.IsBot == true)
@@ -401,9 +397,7 @@ function CombatService.PushHeroAttributes(entity)
 		return
 	end
 	model:SetAttribute("AttackCooldown", CombatService.GetAttackCooldown(entity))
-	-- Royale Wanderers have no Q until they loot a skill
 	model:SetAttribute("AbilityCooldown", entity.Class.Ability and CombatService.GetCooldown(entity, entity.Class.Ability.Cooldown) or 0)
-	model:SetAttribute("SkillKey", entity.Class.SkillKey or "")
 	model:SetAttribute("CooldownReduction", entity.CooldownReduction or 0)
 	model:SetAttribute("AbilityReadyAt", entity.AbilityReadyAt)
 	model:SetAttribute("EmpoweredAttack", entity.NextAttackMultiplier > 1)
@@ -1260,18 +1254,28 @@ function CombatService.IsInEnemySmoke(entity)
 	return false
 end
 
--- Royale: give a hero the Q skill of another class (looted from a ruin). skillKey = class key.
-function CombatService.SetSkill(entity, skillKey)
-	if not entity or entity.Kind ~= "Hero" then
+-- Royale: switch a living hero to another class (picked up that class's weapon).
+-- Keeps the current health fraction; stats, attack and Q come from the new class.
+function CombatService.SetClass(entity, classKey)
+	local classDef = ClassDefinitions.Get(classKey)
+	if not entity or entity.Kind ~= "Hero" or not classDef then
 		return false
 	end
-	local participant = entity.Participant
-	if participant then
-		participant.Skill = skillKey
-	end
-	entity.Class = ClassDefinitions.WithSkill(entity.ClassKey, skillKey)
+	local fraction = entity.MaxHealth > 0 and entity.Health / entity.MaxHealth or 1
+	entity.ClassKey = classKey
+	entity.Class = classDef
 	entity.AbilityReadyAt = Util.Now() + 1
 	entity.BloodRushUntil = 0
+	entity.NextAttackMultiplier = 1
+	if entity.Participant then
+		entity.Participant.ClassKey = classKey
+		CombatService.RefreshParticipantBonuses(entity.Participant)
+	end
+	entity.Health = math.max(1, entity.MaxHealth * fraction)
+	CombatService.SyncHealth(entity)
+	if entity.Model then
+		entity.Model:SetAttribute("Class", classKey)
+	end
 	CombatService.RecomputeSpeed(entity)
 	CombatService.PushHeroAttributes(entity)
 	return true

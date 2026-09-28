@@ -332,9 +332,10 @@ end
 -- Golem: guards its summoner. Attacks enemy heroes / creeps / flags near the owner,
 -- otherwise follows. Crumbles when its lifetime ends or the owner dies.
 local GOLEM = ItemDefinitions.Golem
+local GOLEM_TARGET_KINDS = { Hero = true, Creep = true, Flag = true, Monster = true, Ruin = true, Cross = true }
 local function isValidGolemTarget(golem, target)
 	return target and target.Alive and CombatService.AreEnemies(golem, target)
-		and (target.Kind == "Hero" or target.Kind == "Creep" or target.Kind == "Flag") and not CombatService.IsStealthed(target)
+		and GOLEM_TARGET_KINDS[target.Kind] and not CombatService.IsStealthed(target)
 end
 
 local function thinkGolem(golem, now)
@@ -359,15 +360,17 @@ local function thinkGolem(golem, now)
 		return Util.FlatDistance(ownerPosition, CombatService.GetPosition(entity)) <= GOLEM.LeashRange
 	end
 	local target = golem.Target
+	-- always switch to whatever the summoner is hitting right now (focus fire)
+	local ownerTarget = ownerEntity.LastTarget
+	if ownerTarget and ownerTarget ~= target and isValidGolemTarget(golem, ownerTarget) and leashed(ownerTarget) then
+		target = ownerTarget
+	end
 	if not isValidGolemTarget(golem, target) or not leashed(target) then
 		target = nil
-		-- prefer whatever the owner is fighting, else the nearest enemy near the golem
-		local ownerTarget = ownerEntity.LastTarget
+		-- otherwise defend the summoner, else the nearest enemy near the golem
 		local attacker = ownerEntity.LastAttacker
 		if attacker and now - (ownerEntity.LastDamagedAt or 0) < 3 and isValidGolemTarget(golem, attacker) and leashed(attacker) then
 			target = attacker -- defend the summoner first
-		elseif ownerTarget and isValidGolemTarget(golem, ownerTarget) and leashed(ownerTarget) then
-			target = ownerTarget
 		else
 			target = CombatService.FindNearestEnemy(golem, position, GOLEM.AggroRange, function(entity)
 				return isValidGolemTarget(golem, entity) and leashed(entity)
@@ -598,7 +601,7 @@ end
 
 -- Golem Heart (SummonGolem). Called by ItemService after cooldown/ownership validation.
 -- One golem per hero: a new summon replaces the old one. Returns ok, reason.
-function CreepService.SpawnGolem(entity, ability)
+function CreepService.SpawnGolem(entity, ability, landingPoint)
 	if not CombatService.Active then
 		return false, "No match in progress"
 	end
@@ -612,7 +615,7 @@ function CreepService.SpawnGolem(entity, ability)
 	local origin = CombatService.GetPosition(entity)
 	local forward = entity.Root and Util.Flat(entity.Root.CFrame.LookVector) or Vector3.new(0, 0, -1)
 	forward = forward.Magnitude > 0.1 and forward.Unit or Vector3.new(0, 0, -1)
-	local spawnPosition = CombatService.ClampToArena(origin + forward * 4)
+	local spawnPosition = CombatService.ClampToArena(landingPoint or (origin + forward * 4))
 	-- ground height under the spawn point
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
