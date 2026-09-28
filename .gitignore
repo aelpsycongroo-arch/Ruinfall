@@ -1,0 +1,20 @@
+# Roblox Studio lock/backup files
+*.rbxl.lock
+*.rbxlx.lock
+*.rbxl.bak
+*.rbxlx.bak
+
+# Rojo build output
+/build/
+*.rbxl.build
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Tooling
+/Packages/
+/ServerPackages/
+/DevPackages/
