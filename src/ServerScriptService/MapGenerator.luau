@@ -1,0 +1,693 @@
+-- MapGenerator: seeded, rotationally symmetric procedural arenas.
+-- Features are generated inside one sector and rotated for every base slot,
+-- so every team gets an equivalent layout (balanced, never impossible).
+
+-- Services
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Constants = require(Shared:WaitForChild("Constants"))
+local MapDefinitions = require(Shared:WaitForChild("MapDefinitions"))
+local Util = require(Shared:WaitForChild("Util"))
+local PropBuilder = require(script.Parent:WaitForChild("PropBuilder"))
+
+-- Constants
+local GEN = MapDefinitions.Generation
+local PALETTE = MapDefinitions.Palette
+local WALL_HEIGHT = Constants.Map.WALL_HEIGHT
+local VERTICAL = CFrame.Angles(0, 0, math.rad(90)) -- cylinder axis X -> Y
+
+-- State
+local MapGenerator = {}
+MapGenerator.Current = nil
+
+-- Functions
+local function makePart(properties)
+	local part = Instance.new("Part")
+	part.Anchored = true
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	local parent = properties.Parent
+	for key, value in pairs(properties) do
+		if key ~= "Parent" then
+			part[key] = value
+		end
+	end
+	part.Parent = parent
+	return part
+end
+
+local function makeDecor(properties)
+	properties.CanCollide = false
+	properties.CanQuery = false
+	properties.CanTouch = false
+	return makePart(properties)
+end
+
+local function flatDisc(position, diameter, height, color, material, parent, transparency)
+	return makeDecor({
+		Name = "Disc",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(height, diameter, diameter),
+		CFrame = CFrame.new(position) * VERTICAL,
+		Color = color,
+		Material = material,
+		Transparency = transparency or 0,
+		CastShadow = false,
+		Parent = parent,
+	})
+end
+
+-- Ground + boundary -------------------------------------------------------------
+local function buildGround(mapData, folders)
+	local radius = mapData.Radius
+	local outer = makePart({
+		Name = "OuterGround",
+		Size = Vector3.new(900, 2, 900),
+		Position = Vector3.new(0, -1.1, 0),
+		Color = Color3.fromRGB(95, 90, 110),
+		Parent = folders.Ground,
+	})
+	if PropBuilder.HasAssets() then
+		outer.Material = Enum.Material.Grass
+		outer.Color = Color3.fromRGB(62, 86, 42)
+	else
+		PropBuilder.ApplyVariant(outer, "Stone")
+	end
+	local floor = makePart({
+		Name = "ArenaFloor",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(2, radius * 2 + 10, radius * 2 + 10),
+		CFrame = CFrame.new(0, -1, 0) * VERTICAL,
+		Color = Color3.fromRGB(225, 220, 235),
+		Parent = folders.Ground,
+	})
+	if PropBuilder.HasAssets() then
+		-- stylised grass; colour variation comes from the ground decals (see buildGroundDressing)
+		floor.Material = Enum.Material.Grass
+		floor.Color = Color3.fromRGB(96, 128, 56)
+	else
+		PropBuilder.ApplyVariant(floor, "Ground")
+	end
+end
+
+local function buildBoundary(mapData, folders)
+	local radius = mapData.Radius
+	local segments = GEN.BOUNDARY_SEGMENTS
+	local height = GEN.BOUNDARY_HEIGHT
+	local segmentLength = 2 * math.pi * (radius + 2) / segments + 1.5
+	for index = 1, segments do
+		local angle = (index - 0.5) * 2 * math.pi / segments
+		local position = Util.RotateY(Vector3.new(0, 0, radius + 2), angle)
+		local cframe = CFrame.lookAt(Vector3.new(position.X, height / 2, position.Z), Vector3.new(0, height / 2, 0))
+		local wall = PropBuilder.Collider(folders.Blockers, "Boundary", Vector3.new(segmentLength, height, 4), cframe)
+		wall:SetAttribute("Boundary", true)
+		PropBuilder.Cliff(folders.Decor, Util.RotateY(Vector3.new(0, 0, radius + 6), angle), mapData.DecorRandom)
+		if index % 4 == 0 then
+			makeDecor({
+				Name = "BoundaryCrystal",
+				Size = Vector3.new(1.4, 3.5, 1.4),
+				CFrame = cframe * CFrame.new(0, height / 2 + 1.2, 0) * CFrame.Angles(0, math.rad(45), math.rad(15)),
+				Color = Color3.fromRGB(130, 90, 255),
+				Material = Enum.Material.Neon,
+				CastShadow = false,
+				Parent = folders.Decor,
+			})
+		end
+	end
+end
+
+-- Bases -------------------------------------------------------------------------
+local function buildBases(mapData, folders, activeSet)
+	local radius = mapData.Radius
+	local ring = radius - GEN.BASE_RING_OFFSET
+	local platformRadius = GEN.BASE_PLATFORM_RADIUS
+	for slot = 1, mapData.SlotCount do
+		local angle = (slot - 1) * mapData.SectorAngle
+		local position = Util.RotateY(Vector3.new(0, 0, ring), angle)
+		local active = activeSet[slot] == true
+		local color = active and Constants.GetTeamColor(slot) or PALETTE.InactiveBase
+		local toCenter = Util.FlatDirection(position, Vector3.zero)
+		local base = {
+			Slot = slot,
+			Team = slot,
+			Position = position,
+			Angle = angle,
+			Active = active,
+			ToCenter = toCenter,
+			SpawnPoints = {},
+		}
+		local baseFolder = Instance.new("Folder")
+		baseFolder.Name = "Base" .. slot
+		baseFolder.Parent = folders.Bases
+		base.Folder = baseFolder
+
+		if PropBuilder.Shrine(baseFolder, position, platformRadius, mapData.DecorRandom) then
+			-- capture shrine: worn stone rings + a subtle team-colour glow at the rim and around the flag
+			flatDisc(position + Vector3.new(0, -0.35, 0), platformRadius * 2 + 1.4, 0.6, color, Enum.Material.Neon, baseFolder, active and 0.55 or 0.92)
+			flatDisc(position + Vector3.new(0, 0.33, 0), 9.4, 0.06, color, Enum.Material.Neon, baseFolder, active and 0.82 or 0.95)
+			if active then
+				for _, side in ipairs({ -1, 1 }) do
+					local spot = position + Util.RotateY(toCenter, math.rad(side * 42)) * (platformRadius + 1.2)
+					PropBuilder.Brazier(baseFolder, spot)
+				end
+			end
+		else
+			PropBuilder.ApplyVariant(flatDisc(position + Vector3.new(0, -0.3, 0), platformRadius * 2, 1, Color3.fromRGB(215, 210, 225):Lerp(color, active and 0.18 or 0.05), Enum.Material.Slate, baseFolder), "Cobble")
+			flatDisc(position + Vector3.new(0, -0.4, 0), platformRadius * 2 + 1.6, 0.9, color, Enum.Material.Neon, baseFolder, active and 0.4 or 0.8)
+			flatDisc(position + Vector3.new(0, 0.22, 0), 9, 0.1, color, Enum.Material.Neon, baseFolder, active and 0.8 or 0.9)
+		end
+
+		-- Defensive pillars (leave an entrance toward the arena center)
+		for _, degrees in ipairs({ 65, 115, 180, 245, 295 }) do
+			local direction = Util.RotateY(toCenter, math.rad(degrees))
+			local pillarPosition = position + direction * (platformRadius - 1.8)
+			local pillarHeight = active and 8 or 5
+			local pillar = PropBuilder.Collider(folders.Blockers, "BasePillar", Vector3.new(2.4, pillarHeight, 2.4), CFrame.new(pillarPosition + Vector3.new(0, pillarHeight / 2, 0)))
+			pillar:SetAttribute("MinimapShape", "Box")
+			local inward = -direction
+			PropBuilder.Column(baseFolder, pillarPosition, pillarHeight, {
+				Broken = not active,
+				Accent = active and color or nil,
+				Random = mapData.DecorRandom,
+				Facing = math.atan2(-inward.X, -inward.Z),
+			})
+		end
+
+		-- Spawn points around the flag, on the side facing the arena
+		for index = 1, 6 do
+			local offsetAngle = math.rad(-55 + (index - 1) * 22)
+			local direction = Util.RotateY(toCenter, offsetAngle)
+			table.insert(base.SpawnPoints, position + direction * GEN.SPAWN_RING_RADIUS + Vector3.new(0, 0.2, 0))
+		end
+		if Constants.DEBUG_MODE then
+			for _, spawnPoint in ipairs(base.SpawnPoints) do
+				makeDecor({
+					Name = "DebugSpawn",
+					Shape = Enum.PartType.Ball,
+					Size = Vector3.new(0.8, 0.8, 0.8),
+					Position = spawnPoint + Vector3.new(0, 0.5, 0),
+					Color = Color3.new(0, 1, 0),
+					Material = Enum.Material.Neon,
+					Parent = folders.Markers,
+				})
+			end
+		end
+
+		mapData.Bases[slot] = base
+		table.insert(mapData.Reserved, { Position = position, Radius = GEN.BASE_RESERVED_RADIUS, Kind = "Base" })
+	end
+end
+
+-- Lanes, center, camps ------------------------------------------------------------
+local function buildLanes(mapData, folders)
+	for _, base in ipairs(mapData.Bases) do
+		local a = base.Position + base.ToCenter * (GEN.BASE_PLATFORM_RADIUS + 1)
+		local b = Vector3.zero - base.ToCenter * GEN.CENTER_RESERVED_RADIUS
+		local length = (b - a).Magnitude
+		local middle = (a + b) / 2
+		if not PropBuilder.Road(folders.Decor, a, b, GEN.LANE_WIDTH, mapData.DecorRandom) then
+			local lane = makeDecor({
+				Name = "Lane",
+				Size = Vector3.new(GEN.LANE_WIDTH, 0.1, length),
+				CFrame = CFrame.lookAt(Vector3.new(middle.X, 0.04, middle.Z), Vector3.new(b.X, 0.04, b.Z)),
+				Color = Color3.fromRGB(205, 198, 210),
+				CastShadow = false,
+				Parent = folders.Decor,
+			})
+			PropBuilder.ApplyVariant(lane, "Cobble")
+		end
+		table.insert(mapData.Lanes, { A = a, B = b, Width = GEN.LANE_WIDTH })
+	end
+end
+
+local function buildCenter(mapData, folders)
+	if PropBuilder.Shrine(folders.Decor, Vector3.zero, GEN.CENTER_RESERVED_RADIUS, mapData.DecorRandom) then
+		flatDisc(Vector3.new(0, 0.07, 0), 11, 0.1, Color3.fromRGB(150, 120, 200), Enum.Material.Neon, folders.Decor, 0.8)
+	else
+		PropBuilder.ApplyVariant(flatDisc(Vector3.new(0, 0.05, 0), GEN.CENTER_RESERVED_RADIUS * 2, 0.12, Color3.fromRGB(200, 190, 225), Enum.Material.Slate, folders.Decor), "Cobble")
+		flatDisc(Vector3.new(0, 0.07, 0), 12, 0.12, Color3.fromRGB(140, 100, 255), Enum.Material.Neon, folders.Decor, 0.6)
+	end
+	PropBuilder.ApplyVariant(flatDisc(Vector3.new(0, 0.09, 0), 9, 0.12, Color3.fromRGB(235, 225, 210), Enum.Material.Slate, folders.Decor), "Ruin")
+	table.insert(mapData.Reserved, { Position = Vector3.zero, Radius = GEN.CENTER_RESERVED_RADIUS, Kind = "Center" })
+end
+
+local function buildCamps(mapData, folders, rng)
+	local campCount = math.max(mapData.SlotCount, GEN.MIN_CAMPS)
+	local campRadius = mapData.Radius * GEN.CAMP_RING_FACTOR
+	for index = 1, campCount do
+		local angle = (index - 0.5) * 2 * math.pi / campCount
+		local position = Util.RotateY(Vector3.new(0, 0, campRadius), angle)
+		local campFolder = Instance.new("Folder")
+		campFolder.Name = "Camp" .. index
+		campFolder.Parent = folders.Camps
+		local dirt = PropBuilder.GroundDecal(campFolder, "Ground_Dirt_A", position, 24, mapData.DecorRandom)
+		if not dirt then
+			flatDisc(position + Vector3.new(0, 0.05, 0), 22, 0.12, PALETTE.Camp, Enum.Material.Ground, campFolder)
+		end
+		for rockIndex = 1, 7 do
+			local rockAngle = (rockIndex / 7) * 2 * math.pi + rng:NextNumber(-0.2, 0.2)
+			local rockPosition = position + Util.RotateY(Vector3.new(0, 0, 10.5), rockAngle)
+			local size = rng:NextNumber(1.4, 2.4)
+			if not PropBuilder.Asset(rockIndex % 3 == 0 and "Rock_Flat" or "Rock_Small", campFolder, CFrame.new(rockPosition) * CFrame.Angles(0, rng:NextNumber(0, 6.28), 0), size * 0.7) then
+				PropBuilder.Piece(campFolder, "Stone", Vector3.new(size, size, size), CFrame.new(rockPosition + Vector3.new(0, size * 0.3, 0)), Color3.fromRGB(190, 180, 170), Enum.PartType.Ball)
+			end
+		end
+		table.insert(mapData.Camps, { Id = "Camp" .. index, Position = position, Angle = angle, Folder = campFolder })
+		table.insert(mapData.Reserved, { Position = position, Radius = GEN.CAMP_RESERVED_RADIUS, Kind = "Camp" })
+	end
+end
+
+-- Spatial validation ---------------------------------------------------------------
+local function segmentIsClear(mapData, a, b, halfThickness)
+	local limit = mapData.Radius - 12
+	if Util.Flat(a).Magnitude > limit or Util.Flat(b).Magnitude > limit then
+		return false
+	end
+	for _, reserved in ipairs(mapData.Reserved) do
+		if Util.PointSegmentDistance2D(reserved.Position, a, b) < reserved.Radius + halfThickness + 3 then
+			return false
+		end
+	end
+	for _, lane in ipairs(mapData.Lanes) do
+		if Util.SegmentDistance2D(a, b, lane.A, lane.B) < lane.Width / 2 + halfThickness + 3 then
+			return false
+		end
+	end
+	for _, wall in ipairs(mapData.Walls) do
+		if Util.SegmentDistance2D(a, b, wall.A, wall.B) < GEN.WALL_SPACING + halfThickness * 2 then
+			return false
+		end
+	end
+	for _, rock in ipairs(mapData.Rocks) do
+		if Util.PointSegmentDistance2D(rock.Position, a, b) < rock.Radius + halfThickness + GEN.WALL_SPACING then
+			return false
+		end
+	end
+	return true
+end
+
+local function circleIsClear(mapData, position, radius, spacing)
+	if Util.Flat(position).Magnitude > mapData.Radius - 12 - radius then
+		return false
+	end
+	for _, reserved in ipairs(mapData.Reserved) do
+		if Util.FlatDistance(reserved.Position, position) < reserved.Radius + radius + 2 then
+			return false
+		end
+	end
+	for _, lane in ipairs(mapData.Lanes) do
+		if Util.PointSegmentDistance2D(position, lane.A, lane.B) < lane.Width / 2 + radius + 1 then
+			return false
+		end
+	end
+	for _, wall in ipairs(mapData.Walls) do
+		if Util.PointSegmentDistance2D(position, wall.A, wall.B) < radius + wall.Thickness / 2 + spacing then
+			return false
+		end
+	end
+	for _, rock in ipairs(mapData.Rocks) do
+		if Util.FlatDistance(rock.Position, position) < rock.Radius + radius + spacing then
+			return false
+		end
+	end
+	return true
+end
+
+-- Walls -------------------------------------------------------------------------------
+local function buildWallPart(folders, a, b, rng)
+	PropBuilder.Wall(folders.Blockers, folders.Decor, a, b, WALL_HEIGHT, GEN.WALL_THICKNESS, rng)
+end
+
+local function buildWalls(mapData, folders, rng)
+	local slotCount = mapData.SlotCount
+	local half = GEN.WALL_THICKNESS / 2
+	local perSector = math.ceil(GEN.TOTAL_WALLS / slotCount)
+	local placed, attempts = 0, 0
+	while placed < perSector and attempts < 400 do
+		attempts += 1
+		local distance = rng:NextNumber(28, mapData.Radius - 22)
+		local theta = rng:NextNumber(0, mapData.SectorAngle)
+		local center = Util.RotateY(Vector3.new(0, 0, distance), theta)
+		local length = rng:NextNumber(GEN.WALL_MIN_LENGTH, GEN.WALL_MAX_LENGTH)
+		local orientation = rng:NextNumber(0, math.pi)
+		local direction = Vector3.new(math.cos(orientation), 0, math.sin(orientation))
+		local a = center - direction * length / 2
+		local b = center + direction * length / 2
+		local pieces = { { a, b } }
+		if rng:NextNumber() < 0.35 then
+			local perpendicular = Vector3.new(-direction.Z, 0, direction.X) * (rng:NextNumber() < 0.5 and 1 or -1)
+			table.insert(pieces, { b, b + perpendicular * rng:NextNumber(8, 14) })
+		end
+
+		-- Validate every rotated copy against the map and against each other
+		local accepted = {}
+		local valid = true
+		for copyIndex = 0, slotCount - 1 do
+			local rotation = copyIndex * mapData.SectorAngle
+			local rotated = {}
+			for _, piece in ipairs(pieces) do
+				local ra, rb = Util.RotateY(piece[1], rotation), Util.RotateY(piece[2], rotation)
+				if not segmentIsClear(mapData, ra, rb, half) then
+					valid = false
+					break
+				end
+				for _, other in ipairs(accepted) do
+					if Util.SegmentDistance2D(ra, rb, other[1], other[2]) < GEN.WALL_SPACING + half * 2 then
+						valid = false
+						break
+					end
+				end
+				if not valid then
+					break
+				end
+				table.insert(rotated, { ra, rb })
+			end
+			if not valid then
+				break
+			end
+			for _, segment in ipairs(rotated) do
+				table.insert(accepted, segment)
+			end
+		end
+
+		if valid then
+			for _, segment in ipairs(accepted) do
+				table.insert(mapData.Walls, { A = segment[1], B = segment[2], Thickness = GEN.WALL_THICKNESS })
+				buildWallPart(folders, segment[1], segment[2], mapData.DecorRandom)
+			end
+			placed += 1
+		end
+	end
+end
+
+local function buildRocks(mapData, folders, rng)
+	local slotCount = mapData.SlotCount
+	local perSector = math.ceil(GEN.TOTAL_ROCKS / slotCount)
+	local placed, attempts = 0, 0
+	while placed < perSector and attempts < 300 do
+		attempts += 1
+		local rockRadius = rng:NextNumber(2.5, 4.5)
+		local distance = rng:NextNumber(24, mapData.Radius - 18)
+		local theta = rng:NextNumber(0, mapData.SectorAngle)
+		local position = Util.RotateY(Vector3.new(0, 0, distance), theta)
+		local copies = {}
+		local valid = true
+		for copyIndex = 0, slotCount - 1 do
+			local rotated = Util.RotateY(position, copyIndex * mapData.SectorAngle)
+			if not circleIsClear(mapData, rotated, rockRadius, 6) then
+				valid = false
+				break
+			end
+			for _, other in ipairs(copies) do
+				if Util.FlatDistance(other, rotated) < rockRadius * 2 + 6 then
+					valid = false
+					break
+				end
+			end
+			if not valid then
+				break
+			end
+			table.insert(copies, rotated)
+		end
+		if valid then
+			local height = rng:NextNumber(5, 8)
+			local spin = rng:NextNumber(0, math.pi * 2)
+			for _, rockPosition in ipairs(copies) do
+				table.insert(mapData.Rocks, { Position = rockPosition, Radius = rockRadius })
+				local rock = PropBuilder.Collider(folders.Blockers, "Rock", Vector3.new(height, rockRadius * 2, rockRadius * 2), CFrame.new(rockPosition + Vector3.new(0, height / 2, 0)) * CFrame.Angles(0, spin, 0) * VERTICAL, Enum.PartType.Cylinder)
+				rock:SetAttribute("MinimapShape", "Circle")
+				PropBuilder.Boulder(folders.Decor, rockPosition, rockRadius, mapData.DecorRandom)
+			end
+			placed += 1
+		end
+	end
+end
+
+-- Brush ---------------------------------------------------------------------------------
+local function brushIsClear(mapData, position, halfDiagonal)
+	if Util.Flat(position).Magnitude > mapData.Radius - 10 - halfDiagonal then
+		return false
+	end
+	for _, reserved in ipairs(mapData.Reserved) do
+		local clearance = reserved.Kind == "Base" and reserved.Radius or 10
+		if Util.FlatDistance(reserved.Position, position) < clearance + halfDiagonal then
+			return false
+		end
+	end
+	for _, wall in ipairs(mapData.Walls) do
+		if Util.PointSegmentDistance2D(position, wall.A, wall.B) < halfDiagonal + wall.Thickness / 2 + 1 then
+			return false
+		end
+	end
+	for _, rock in ipairs(mapData.Rocks) do
+		if Util.FlatDistance(rock.Position, position) < rock.Radius + halfDiagonal + 1 then
+			return false
+		end
+	end
+	for _, zone in ipairs(mapData.BrushZones) do
+		if Util.FlatDistance(zone.CFrame.Position, position) < zone.HalfDiagonal + halfDiagonal + 3 then
+			return false
+		end
+	end
+	return true
+end
+
+local function buildBrush(mapData, folders, rng)
+	local slotCount = mapData.SlotCount
+	local perSector = math.ceil(GEN.TOTAL_BRUSH / slotCount)
+	local placed, attempts = 0, 0
+	while placed < perSector and attempts < 300 do
+		attempts += 1
+		local width = rng:NextNumber(GEN.BRUSH_MIN_SIZE, GEN.BRUSH_MAX_SIZE)
+		local depth = rng:NextNumber(GEN.BRUSH_MIN_SIZE, GEN.BRUSH_MAX_SIZE)
+		local halfDiagonal = math.sqrt(width * width + depth * depth) / 2
+		local distance = rng:NextNumber(20, mapData.Radius - 16)
+		local theta = rng:NextNumber(0, mapData.SectorAngle)
+		local yaw = rng:NextNumber(0, math.pi)
+		local position = Util.RotateY(Vector3.new(0, 0, distance), theta)
+		local copies = {}
+		local valid = true
+		for copyIndex = 0, slotCount - 1 do
+			local rotated = Util.RotateY(position, copyIndex * mapData.SectorAngle)
+			if not brushIsClear(mapData, rotated, halfDiagonal) then
+				valid = false
+				break
+			end
+			for _, other in ipairs(copies) do
+				if Util.FlatDistance(other.Position, rotated) < halfDiagonal * 2 + 3 then
+					valid = false
+					break
+				end
+			end
+			if not valid then
+				break
+			end
+			table.insert(copies, { Position = rotated, Yaw = yaw + copyIndex * mapData.SectorAngle })
+		end
+		if valid then
+			for _, copy in ipairs(copies) do
+				local height = GEN.BRUSH_HEIGHT
+				local cframe = CFrame.new(copy.Position + Vector3.new(0, height / 2, 0)) * CFrame.Angles(0, copy.Yaw, 0)
+				local size = Vector3.new(width, height, depth)
+				local _, brush = PropBuilder.Bush(folders.Brush, cframe, size, mapData.DecorRandom)
+				table.insert(mapData.BrushZones, { CFrame = cframe, Size = size, Part = brush, HalfDiagonal = halfDiagonal })
+			end
+			placed += 1
+		end
+	end
+end
+
+-- Soft dirt / darker / lighter grass decals + sparse plants so the grass never reads as a flat plane
+local function buildGroundDressing(mapData, folders, rng)
+	if not PropBuilder.HasAssets() then
+		return
+	end
+	local folder = Instance.new("Folder")
+	folder.Name = "GroundDressing"
+	folder.Parent = folders.Decor
+	local kinds = { "Ground_GrassDark", "Ground_GrassDark", "Ground_Dirt_A", "Ground_Dirt_B" }
+	for _ = 1, 45 do
+		local position = Util.RotateY(Vector3.new(0, 0, math.sqrt(rng:NextNumber()) * (mapData.Radius - 6)), rng:NextNumber(0, math.pi * 2))
+		PropBuilder.GroundDecal(folder, kinds[rng:NextInteger(1, #kinds)], position, rng:NextNumber(10, 22), rng)
+	end
+	-- worn dirt beside the roads
+	for _, lane in ipairs(mapData.Lanes) do
+		for t = 0.1, 0.9, 0.2 do
+			local p = lane.A:Lerp(lane.B, t + rng:NextNumber(-0.05, 0.05))
+			local side = Vector3.new(-(lane.B - lane.A).Unit.Z, 0, (lane.B - lane.A).Unit.X) * (rng:NextNumber() < 0.5 and -1 or 1)
+			PropBuilder.GroundDecal(folder, rng:NextNumber() < 0.5 and "Ground_Dirt_A" or "Ground_Dirt_B", p + side * rng:NextNumber(5, 7), rng:NextNumber(7, 11), rng)
+		end
+	end
+	for _ = 1, 70 do
+		local position = Util.RotateY(Vector3.new(0, 0, rng:NextNumber(18, mapData.Radius - 8)), rng:NextNumber(0, math.pi * 2))
+		if circleIsClear(mapData, position, 1, 0.5) then
+			PropBuilder.ScatterSmall(folder, position, 1.2, rng, rng:NextInteger(1, 3), true)
+		end
+	end
+end
+
+local function buildDecor(mapData, folders, rng)
+	if PropBuilder.HasAssets() then
+		for _ = 1, 26 do
+			local position = Util.RotateY(Vector3.new(0, 0, rng:NextNumber(20, mapData.Radius - 8)), rng:NextNumber(0, math.pi * 2))
+			if circleIsClear(mapData, position, 1.5, 1) then
+				local name = ({ "Rock_Small", "Rock_Small", "Rock_Flat", "Bush_Small" })[rng:NextInteger(1, 4)]
+				PropBuilder.Asset(name, folders.Decor, CFrame.new(position) * CFrame.Angles(0, rng:NextNumber(0, 6.28), 0), rng:NextNumber(0.8, 1.3))
+			end
+		end
+		buildGroundDressing(mapData, folders, rng)
+		return
+	end
+	for _ = 1, 40 do
+		local position = Util.RotateY(Vector3.new(0, 0, rng:NextNumber(20, mapData.Radius - 8)), rng:NextNumber(0, math.pi * 2))
+		if circleIsClear(mapData, position, 1, 1) then
+			local size = rng:NextNumber(0.8, 1.6)
+			if rng:NextNumber() < 0.35 then
+				PropBuilder.Piece(folders.Decor, "Leaves", Vector3.new(size * 1.3, size * 1.3, size * 1.3), CFrame.new(position + Vector3.new(0, size * 0.3, 0)), Color3.fromRGB(165, 215, 150), Enum.PartType.Ball)
+			else
+				PropBuilder.Piece(folders.Decor, "Stone", Vector3.new(size, size, size), CFrame.new(position + Vector3.new(0, size * 0.2, 0)), Color3.fromRGB(190, 185, 200), Enum.PartType.Ball)
+			end
+		end
+	end
+end
+
+-- Public API ---------------------------------------------------------------------------
+function MapGenerator.Clear()
+	local existing = workspace:FindFirstChild("RuinfallMap")
+	if existing then
+		existing:Destroy()
+	end
+	MapGenerator.Current = nil
+end
+
+function MapGenerator.Generate(seed, slotCount, activeTeams)
+	MapGenerator.Clear()
+	local rng = Random.new(seed)
+	local activeSet = {}
+	for _, team in ipairs(activeTeams) do
+		activeSet[team] = true
+	end
+
+	local root = Instance.new("Folder")
+	root.Name = "RuinfallMap"
+	local folders = {}
+	for _, name in ipairs({ "Ground", "Blockers", "Brush", "Bases", "Camps", "Decor", "Markers" }) do
+		local folder = Instance.new("Folder")
+		folder.Name = name
+		folder.Parent = root
+		folders[name] = folder
+	end
+
+	local mapData = {
+		Seed = seed,
+		Radius = Constants.Map.RADIUS,
+		SlotCount = slotCount,
+		SectorAngle = 2 * math.pi / slotCount,
+		Folder = root,
+		Folders = folders,
+		Blockers = folders.Blockers,
+		Bases = {},
+		Camps = {},
+		BrushZones = {},
+		Walls = {},
+		Rocks = {},
+		Lanes = {},
+		Reserved = {},
+		DecorRandom = Random.new(seed + 99), -- cosmetic only, never affects layout
+	}
+
+	buildGround(mapData, folders)
+	buildBoundary(mapData, folders)
+	buildBases(mapData, folders, activeSet)
+	buildLanes(mapData, folders)
+	buildCenter(mapData, folders)
+	buildCamps(mapData, folders, rng)
+	buildWalls(mapData, folders, rng)
+	buildRocks(mapData, folders, rng)
+	buildBrush(mapData, folders, rng)
+	buildDecor(mapData, folders, rng)
+
+	root.Parent = workspace
+	workspace:SetAttribute("ArenaRadius", mapData.Radius)
+	workspace:SetAttribute("MatchSeed", seed)
+	MapGenerator.Current = mapData
+	return mapData
+end
+
+function MapGenerator.GetBrushZoneIndex(position)
+	local mapData = MapGenerator.Current
+	if not mapData then
+		return nil
+	end
+	for index, zone in ipairs(mapData.BrushZones) do
+		if Util.PointInBox2D(position, zone.CFrame, zone.Size) then
+			return index
+		end
+	end
+	return nil
+end
+
+-- Finds a valid ruin location: not in walls, bases, camps, brush or near other ruins.
+function MapGenerator.FindRuinLocation(rng, existingPositions)
+	local mapData = MapGenerator.Current
+	if not mapData then
+		return nil
+	end
+	for _ = 1, 100 do
+		local position = Util.RotateY(Vector3.new(0, 0, rng:NextNumber(0, mapData.Radius - 28)), rng:NextNumber(0, math.pi * 2))
+		local valid = true
+		for _, base in ipairs(mapData.Bases) do
+			if Util.FlatDistance(position, base.Position) < GEN.RUIN_MIN_BASE_DISTANCE then
+				valid = false
+				break
+			end
+		end
+		if valid then
+			for _, camp in ipairs(mapData.Camps) do
+				if Util.FlatDistance(position, camp.Position) < GEN.RUIN_MIN_CAMP_DISTANCE then
+					valid = false
+					break
+				end
+			end
+		end
+		if valid then
+			for _, wall in ipairs(mapData.Walls) do
+				if Util.PointSegmentDistance2D(position, wall.A, wall.B) < GEN.RUIN_WALL_CLEARANCE + wall.Thickness / 2 then
+					valid = false
+					break
+				end
+			end
+		end
+		if valid then
+			for _, rock in ipairs(mapData.Rocks) do
+				if Util.FlatDistance(position, rock.Position) < rock.Radius + GEN.RUIN_WALL_CLEARANCE then
+					valid = false
+					break
+				end
+			end
+		end
+		if valid then
+			for _, zone in ipairs(mapData.BrushZones) do
+				if Util.FlatDistance(position, zone.CFrame.Position) < zone.HalfDiagonal + 6 then
+					valid = false
+					break
+				end
+			end
+		end
+		if valid then
+			for _, other in ipairs(existingPositions or {}) do
+				if Util.FlatDistance(position, other) < GEN.RUIN_MIN_RUIN_DISTANCE then
+					valid = false
+					break
+				end
+			end
+		end
+		if valid then
+			return position
+		end
+	end
+	return nil
+end
+
+return MapGenerator

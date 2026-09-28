@@ -2,22 +2,29 @@
 
 A Roblox game.
 
-## Project layout
+## What's in this repo
 
-This repo uses [Rojo](https://rojo.space) to sync code between the filesystem and Roblox Studio.
+- **`rainfall.rbxl`**: the full place file (map, models, UI, and all scripts). Open it in Roblox Studio.
+- **`src/`**: every live script from the place, saved as plain `.luau` text so it can be read and diffed on GitHub.
 
-| Folder        | Roblox location                                  |
-|---------------|--------------------------------------------------|
-| `src/server`  | `ServerScriptService.Server`                     |
-| `src/client`  | `StarterPlayer.StarterPlayerScripts.Client`      |
-| `src/shared`  | `ReplicatedStorage.Shared`                       |
+`src/` mirrors the Studio Explorer:
 
-File naming: `Name.server.luau` → Script, `Name.client.luau` → LocalScript, `Name.luau` → ModuleScript.
+| Folder                                     | Studio location                            |
+|--------------------------------------------|--------------------------------------------|
+| `src/ServerScriptService`                  | ServerScriptService (game server logic)    |
+| `src/ReplicatedStorage`                    | ReplicatedStorage (shared config/modules)  |
+| `src/StarterPlayer/StarterPlayerScripts`   | StarterPlayerScripts (client code and UI)  |
+| `src/StarterPlayer/StarterCharacterScripts`| StarterCharacterScripts                    |
+| `src/ServerStorage`                        | ServerStorage (Studio tools, HUD builders) |
 
-## Getting started
+File naming: `Name.server.luau` = Script, `Name.client.luau` = LocalScript, `Name.luau` = ModuleScript.
+A folder containing `init.luau` is a ModuleScript that has child scripts.
 
-1. Install Rojo (e.g. via [Aftman](https://github.com/LPGhatguy/aftman) or the Rojo Studio plugin).
-2. Run `rojo serve` in this folder.
-3. In Roblox Studio, open the Rojo plugin and click **Connect**.
+The old copies in `ServerStorage/ScriptBackups` and `ServerStorage/RuinfallOldDraft` are still inside
+`rainfall.rbxl` but aren't exported to `src/`, because Git history now keeps old versions.
 
-To build a place file: `rojo build -o Ruinfall.rbxlx`
+## Syncing with Studio (optional)
+
+This repo is set up for [Rojo](https://rojo.space). Run `rojo serve`, then click **Connect** in the
+Rojo Studio plugin. Rojo only manages the scripts in `src/`; parts, models, UI and other objects in
+the place are left alone.

@@ -1,0 +1,1 @@
+-- Intentionally empty: overrides Roblox default health regen. Ruinfall's CombatService owns health.

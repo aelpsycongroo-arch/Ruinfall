@@ -1,0 +1,1151 @@
+-- ItemService: server-authoritative Mythic item inventory (2 slots) and item-granted
+-- E/R abilities. The rule is fixed and dynamic: MYTHIC SLOT 1 -> E, MYTHIC SLOT 2 -> R.
+-- Clients only send intents (Buy <id>, Sell <slot>, Swap, use E/R); prices, gold,
+-- ownership, class locks, cooldowns, targets and damage are all decided here.
+
+-- Services
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Constants = require(Shared:WaitForChild("Constants"))
+local Util = require(Shared:WaitForChild("Util"))
+local ItemDefinitions = require(Shared:WaitForChild("ItemDefinitions"))
+local AbilityScaling = require(Shared:WaitForChild("AbilityScaling"))
+local Net = require(script.Parent:WaitForChild("Net"))
+local PlayerService = require(script.Parent:WaitForChild("PlayerService"))
+local CombatService = require(script.Parent:WaitForChild("CombatService"))
+local ShopService = require(script.Parent:WaitForChild("ShopService"))
+local MatchManager = require(script.Parent:WaitForChild("MatchManager"))
+
+-- Constants
+local STATE = Constants.MatchState
+local MAX_SLOTS = ItemDefinitions.MAX_MYTHIC_SLOTS
+local BOOT_SLOT = ItemDefinitions.BOOT_SLOT -- 3: the separate boot slot (right mouse)
+local MAX_PASSIVES = ItemDefinitions.MAX_PASSIVE_SLOTS -- 3 passive items (automatic, no hotkey)
+local PASSIVE_BASE = ItemDefinitions.PASSIVE_SLOT_BASE -- slot index of passive N = PASSIVE_BASE + N
+local COOLDOWN_GRACE = 0.15
+local REQUEST_INTERVAL = 0.2
+local UNIT_KINDS = { Hero = true, Monster = true, Creep = true }
+
+-- State
+local ItemService = {}
+local handlers = {}
+local lastRequest = setmetatable({}, { __mode = "k" })
+
+-- Helpers -------------------------------------------------------------------------------
+local function mythicsOf(participant)
+	participant.Mythics = participant.Mythics or {}
+	participant.ItemReadyAt = participant.ItemReadyAt or {}
+	return participant.Mythics
+end
+
+local function passivesOf(participant)
+	participant.Passives = participant.Passives or {}
+	return participant.Passives
+end
+
+local function ownsItem(participant, itemId)
+	if participant.Boots == itemId then
+		return BOOT_SLOT
+	end
+	local passives = passivesOf(participant)
+	for slot = 1, MAX_PASSIVES do
+		if passives[slot] == itemId then
+			return PASSIVE_BASE + slot
+		end
+	end
+	local mythics = mythicsOf(participant)
+	for slot = 1, MAX_SLOTS do
+		if mythics[slot] == itemId then
+			return slot
+		end
+	end
+	return nil
+end
+
+local function firstEmptySlot(participant)
+	local mythics = mythicsOf(participant)
+	for slot = 1, MAX_SLOTS do
+		if not mythics[slot] then
+			return slot
+		end
+	end
+	return nil
+end
+
+local function isValidSlot(slot)
+	return type(slot) == "number" and slot == math.floor(slot) and slot >= 1 and slot <= MAX_SLOTS
+end
+
+local function changed(participant)
+	CombatService.RefreshParticipantBonuses(participant)
+	PlayerService.SetPlayerAttributes(participant)
+	MatchManager.Broadcast()
+end
+
+-- sound (optional): an AudioConfig cue the buyer's client plays with the notification
+local function notify(player, message, style, sound)
+	if player then -- a nil target would broadcast to everyone
+		Net.Notify(player, message, style, sound and { Sound = sound } or nil)
+	end
+end
+
+local function reject(player, message)
+	notify(player, message, "Warning", "UI.PurchaseFail")
+	return false, message
+end
+
+local function isUnitEnemy(entity, candidate)
+	return candidate and candidate.Alive and UNIT_KINDS[candidate.Kind] and CombatService.AreEnemies(entity, candidate)
+end
+
+-- Inventory -----------------------------------------------------------------------------
+-- replaceSlot (optional): when both slots are full the player must explicitly choose a
+-- slot to replace; the old item is sold for its sell value. Never replaced silently.
+-- Boots go to their own slot. Owning boots of another class (after a class change) is
+-- replaced explicitly by buying new boots; the old pair is sold back for half.
+local function buyBoots(player, participant, item)
+	local canShop, reason = ShopService.CanShop(participant)
+	if not canShop then
+		return reject(player, reason)
+	end
+	if not ItemDefinitions.CanClassUse(item, participant.ClassKey) then
+		return reject(player, "LOCKED - Requires " .. tostring(item.Class))
+	end
+	if participant.Boots == item.Id then
+		return reject(player, "You already own " .. item.Name)
+	end
+	local old = ItemDefinitions.GetItem(participant.Boots)
+	local refund = old and ItemDefinitions.GetSellValue(old) or 0
+	local gold = PlayerService.GetGold(participant)
+	if gold + refund < item.Price then
+		return reject(player, string.format("Not enough gold (%d / %d)", math.floor(gold + refund), item.Price))
+	end
+	PlayerService.AddGold(participant, refund - item.Price)
+	participant.Boots = item.Id
+	changed(participant)
+	if old then
+		notify(player, string.format("Replaced %s with %s (+%d gold)", old.Name, item.Name, refund), "Success", "UI.BootsAcquire")
+	else
+		notify(player, string.format("%s equipped in the Boot Slot (Right Mouse)", item.Name), "Success", "UI.BootsAcquire")
+	end
+	return true, BOOT_SLOT
+end
+
+-- Passive items: up to MAX_PASSIVES different ones, placed in the first free passive slot.
+-- No duplicates, never replaced silently (sell one first when all 3 slots are used).
+local function buyPassive(player, participant, item)
+	local canShop, reason = ShopService.CanShop(participant)
+	if not canShop then
+		return reject(player, reason)
+	end
+	if not ItemDefinitions.CanClassUse(item, participant.ClassKey) then
+		return reject(player, "LOCKED - Requires " .. tostring(item.Class))
+	end
+	local passives = passivesOf(participant)
+	local free = nil
+	for slot = 1, MAX_PASSIVES do
+		if passives[slot] == item.Id then
+			return reject(player, "You already own " .. item.Name)
+		end
+		if not passives[slot] and not free then
+			free = slot
+		end
+	end
+	if not free then
+		return reject(player, string.format("PASSIVE SLOTS FULL (%d / %d) - sell a passive item first", MAX_PASSIVES, MAX_PASSIVES))
+	end
+	local gold = PlayerService.GetGold(participant)
+	if gold < item.Price then
+		return reject(player, string.format("Not enough gold (%d / %d)", math.floor(gold), item.Price))
+	end
+	PlayerService.AddGold(participant, -item.Price)
+	passives[free] = item.Id
+	changed(participant)
+	notify(player, string.format("%s equipped in Passive Slot %d", item.Name, free), "Success", "UI.MythicAcquire")
+	return true, PASSIVE_BASE + free
+end
+
+function ItemService.Buy(player, participant, itemId, replaceSlot)
+	local item = ItemDefinitions.GetItem(itemId)
+	if item and item.SlotType == "Boots" then
+		return buyBoots(player, participant, item)
+	end
+	if item and item.SlotType == "Passive" then
+		return buyPassive(player, participant, item)
+	end
+	if not item or item.SlotType ~= "Mythic" then
+		return reject(player, "Unknown item")
+	end
+	local canShop, reason = ShopService.CanShop(participant)
+	if not canShop then
+		return reject(player, reason)
+	end
+	if not ItemDefinitions.CanClassUse(item, participant.ClassKey) then
+		return reject(player, "LOCKED - Requires " .. tostring(item.Class))
+	end
+	if ownsItem(participant, itemId) then
+		return reject(player, "You already own " .. item.Name)
+	end
+	local mythics = mythicsOf(participant)
+	local slot = firstEmptySlot(participant)
+	local refund = 0
+	if not slot then
+		if replaceSlot == nil then
+			return reject(player, "MYTHIC SLOTS FULL")
+		end
+		if not isValidSlot(replaceSlot) or not mythics[replaceSlot] then
+			return reject(player, "Invalid slot to replace")
+		end
+		slot = replaceSlot
+		refund = ItemDefinitions.GetSellValue(ItemDefinitions.GetItem(mythics[slot]))
+	end
+	local gold = PlayerService.GetGold(participant)
+	if gold + refund < item.Price then
+		return reject(player, string.format("Not enough gold (%d / %d)", math.floor(gold + refund), item.Price))
+	end
+	local replaced = mythics[slot]
+	PlayerService.AddGold(participant, refund - item.Price)
+	mythics[slot] = itemId
+	changed(participant)
+	if replaced then
+		notify(player, string.format("Replaced %s with %s (+%d gold)", ItemDefinitions.GetItem(replaced).Name, item.Name, refund), "Success", "UI.MythicAcquire")
+	else
+		notify(player, string.format("%s equipped in Mythic Slot %d (%s)", item.Name, slot, ItemDefinitions.SLOT_KEYS[slot]), "Success", "UI.MythicAcquire")
+	end
+	return true, slot
+end
+
+function ItemService.Sell(player, participant, slot)
+	if slot == BOOT_SLOT then
+		local canShop, reason = ShopService.CanShop(participant)
+		if not canShop then
+			return reject(player, reason)
+		end
+		local boots = ItemDefinitions.GetItem(participant.Boots)
+		if not boots then
+			return reject(player, "Your boot slot is empty")
+		end
+		local bootValue = ItemDefinitions.GetSellValue(boots)
+		participant.Boots = nil
+		PlayerService.AddGold(participant, bootValue)
+		changed(participant)
+		notify(player, string.format("Sold %s for %d gold", boots.Name, bootValue), "Success", "UI.Sell")
+		return true, bootValue
+	end
+	if type(slot) == "number" and slot > PASSIVE_BASE and slot <= PASSIVE_BASE + MAX_PASSIVES and slot == math.floor(slot) then
+		local canShop, reason = ShopService.CanShop(participant)
+		if not canShop then
+			return reject(player, reason)
+		end
+		local passives = passivesOf(participant)
+		local index = slot - PASSIVE_BASE
+		local passive = ItemDefinitions.GetItem(passives[index])
+		if not passive then
+			return reject(player, "That passive slot is empty")
+		end
+		local passiveValue = ItemDefinitions.GetSellValue(passive)
+		passives[index] = nil
+		PlayerService.AddGold(participant, passiveValue)
+		changed(participant)
+		notify(player, string.format("Sold %s for %d gold", passive.Name, passiveValue), "Success", "UI.Sell")
+		return true, passiveValue
+	end
+	if not isValidSlot(slot) then
+		return reject(player, "Invalid slot")
+	end
+	local canShop, reason = ShopService.CanShop(participant)
+	if not canShop then
+		return reject(player, reason)
+	end
+	local mythics = mythicsOf(participant)
+	local item = ItemDefinitions.GetItem(mythics[slot])
+	if not item then
+		return reject(player, "That slot is empty")
+	end
+	local value = ItemDefinitions.GetSellValue(item)
+	mythics[slot] = nil
+	PlayerService.AddGold(participant, value)
+	changed(participant)
+	notify(player, string.format("Sold %s for %d gold", item.Name, value), "Success", "UI.Sell")
+	return true, value
+end
+
+-- Slot 1 <-> Slot 2. Hotkeys follow slots automatically (slot 1 = E, slot 2 = R).
+function ItemService.Swap(player, participant)
+	if MatchManager.State ~= STATE.ACTIVE then
+		return reject(player, "Items can only be swapped during a match")
+	end
+	local mythics = mythicsOf(participant)
+	if not mythics[1] and not mythics[2] then
+		return reject(player, "No mythic items to swap")
+	end
+	mythics[1], mythics[2] = mythics[2], mythics[1]
+	changed(participant)
+	return true
+end
+
+-- Item abilities ------------------------------------------------------------------------
+-- handler(entity, ability, origin, aimPosition, targetId, now) -> false, reason to cancel
+-- (a cancelled cast refunds the cooldown).
+
+-- Fighter crowd-control boots: an area stun in a wide cone in front of you (every enemy
+-- inside is hit, no target selection). Casts even when nobody is in range.
+handlers.HeavyKick = function(entity, ability, origin, aimPosition)
+	local direction = Util.FlatDirection(origin, aimPosition, entity.Root.CFrame.LookVector)
+	local cosHalfArc = math.cos(math.rad(ability.Arc / 2))
+	CombatService.BreakStealth(entity)
+	local impact = origin + direction * (ability.Range * 0.6)
+	Net.Effect("Melee", { Origin = origin, Direction = direction, Range = ability.Range, Arc = ability.Arc, Color = ability.Color, Empowered = true, EntityId = entity.Id })
+	Net.Effect("HeavyKick", { Origin = origin, Position = impact, Color = ability.Color })
+	Net.Effect("Shockwave", { Position = impact, Radius = ability.Range * 0.5, Color = ability.Color })
+	local victims = CombatService.GetEntitiesInRadius(origin, ability.Range, function(candidate)
+		return isUnitEnemy(entity, candidate)
+	end)
+	for _, victim in ipairs(victims) do
+		local position = CombatService.GetPosition(victim)
+		local offset = Util.Flat(position - origin)
+		local inCone = offset.Magnitude <= victim.Radius + 1 or offset.Unit:Dot(direction) >= cosHalfArc
+		if inCone and CombatService.HasLineOfSight(origin, position) then
+			CombatService.ApplyDamage(entity, victim, ability.Damage)
+			if victim.Alive then
+				CombatService.Stun(victim, ability.Stun, entity)
+				Net.Effect("Stun", { Position = position, Duration = ability.Stun })
+			end
+		end
+	end
+	return true
+end
+
+handlers.PointStrike = function(entity, ability, origin, _, targetId)
+	local target = type(targetId) == "string" and CombatService.GetEntity(targetId) or nil
+	if not isUnitEnemy(entity, target) then
+		return false, "Select a living enemy"
+	end
+	if CombatService.IsStealthed(target) then
+		return false, "Target is not visible"
+	end
+	local targetPosition = CombatService.GetPosition(target)
+	if Util.FlatDistance(origin, targetPosition) > ability.Range + target.Radius then
+		return false, "Target out of range"
+	end
+	if not CombatService.HasLineOfSight(origin, targetPosition) then
+		return false, "No line of sight"
+	end
+	CombatService.BreakStealth(entity)
+	Net.Effect("PointStrike", { From = origin, Position = targetPosition, Color = ability.Color })
+	CombatService.ApplyDamage(entity, target, ability.Damage, { Crit = true })
+	return true
+end
+
+handlers.WindPull = function(entity, ability, origin, aimPosition)
+	local offset = Util.Flat(aimPosition - origin)
+	if offset.Magnitude > ability.Range then
+		offset = offset.Unit * ability.Range
+	end
+	local center = Vector3.new(origin.X + offset.X, 0.2, origin.Z + offset.Z)
+	CombatService.BreakStealth(entity)
+	Net.Effect("WindPull", { Position = center, Radius = ability.Radius, Duration = ability.Duration, Color = ability.Color })
+	local victims = CombatService.GetEntitiesInRadius(center, ability.Radius, function(candidate)
+		return isUnitEnemy(entity, candidate)
+	end)
+	ItemService.LastDebug = { Ability = "WindPull", Center = center, Victims = {} }
+	for _, victim in ipairs(victims) do
+		table.insert(ItemService.LastDebug.Victims, victim.Id)
+		CombatService.ApplyDamage(entity, victim, ability.Damage, { IgnoreArmor = ability.TrueDamage })
+		if victim.Alive then
+			local position = CombatService.GetPosition(victim)
+			local toCenter = Util.Flat(center - position)
+			local distance = math.min(ability.PullDistance, math.max(0, toCenter.Magnitude - 1.5))
+			if distance > 0.5 then
+				CombatService.Dash(victim, toCenter.Unit, distance, ability.Duration)
+			end
+		end
+	end
+	return true
+end
+
+handlers.SpikedScale = function(entity, ability, origin, _, _, now)
+	entity.ReflectUntil = now + ability.Duration
+	entity.ReflectPercent = ability.ReflectPercent
+	if entity.Model then
+		entity.Model:SetAttribute("SpikedScaleUntil", entity.ReflectUntil)
+	end
+	Net.Effect("SpikedScale", { EntityId = entity.Id, Position = origin, Duration = ability.Duration, Color = ability.Color })
+	return true
+end
+
+handlers.CleavingArc = function(entity, ability, origin, aimPosition)
+	local direction = Util.FlatDirection(origin, aimPosition, entity.Root.CFrame.LookVector)
+	CombatService.BreakStealth(entity)
+	CombatService.MeleeStrike(entity, origin, direction, ability.Range, ability.Arc, ability.Damage, true, true)
+	return true
+end
+
+handlers.Bulwark = function(entity, ability)
+	CombatService.AddShield(entity, ability.Shield, ability.Duration)
+	return true
+end
+
+handlers.Blink = function(entity, ability, origin, aimPosition)
+	local direction = Util.FlatDirection(origin, aimPosition, entity.Root.CFrame.LookVector)
+	local distance = math.clamp(Util.FlatDistance(origin, aimPosition), 4, ability.Range)
+	Net.Effect("Stealth", { Position = origin, Color = ability.Color })
+	CombatService.Dash(entity, direction, distance, 0.08)
+	return true
+end
+
+-- Role items ----------------------------------------------------------------------------
+local function enemiesInRadius(entity, center, radius, unitsOnly)
+	return CombatService.GetEntitiesInRadius(center, radius, function(candidate)
+		if unitsOnly then
+			return isUnitEnemy(entity, candidate)
+		end
+		return CombatService.AreEnemies(entity, candidate)
+	end)
+end
+
+handlers.ShadowDash = function(entity, ability, origin, aimPosition)
+	local direction = Util.FlatDirection(origin, aimPosition, entity.Root.CFrame.LookVector)
+	CombatService.BreakStealth(entity)
+	local finish = CombatService.Dash(entity, direction, ability.Range, 0.18) or origin
+	local path = Util.Flat(finish - origin)
+	local length = path.Magnitude
+	for _, candidate in pairs(CombatService.Entities) do
+		if isUnitEnemy(entity, candidate) then
+			local offset = Util.Flat(CombatService.GetPosition(candidate) - origin)
+			local along = length > 0 and math.clamp(offset:Dot(path.Unit), 0, length) or 0
+			local closest = length > 0 and path.Unit * along or Vector3.zero
+			if (offset - closest).Magnitude <= ability.Width + candidate.Radius then
+				CombatService.ApplyDamage(entity, candidate, ability.Damage)
+			end
+		end
+	end
+	return true
+end
+
+-- Smoke Bomb: a smoke cloud at the caster's feet; enemies inside miss basic attacks
+-- (checked in CombatService.ApplyDamage for every basic attack).
+handlers.SmokeVeil = function(entity, ability, origin)
+	CombatService.AddSmokeZone(entity.Team, origin, ability.Radius, ability.Duration)
+	Net.Effect("SmokeCloud", { Position = Vector3.new(origin.X, 0, origin.Z), Radius = ability.Radius, Duration = ability.Duration, Color = ability.Color })
+	return true
+end
+
+-- Ranged skillshot: full damage to the first enemy hit, then an explosion (SplashPercent of the
+-- damage) on every other enemy within ExplosionRadius of where the fireball lands
+handlers.Fireball = function(entity, ability, origin, aimPosition)
+	local direction = Util.FlatDirection(origin, aimPosition, entity.Root.CFrame.LookVector)
+	CombatService.BreakStealth(entity)
+	CombatService.FireProjectile({
+		Owner = entity, Origin = origin + direction * 1.5, Direction = direction, Speed = ability.Speed,
+		Range = ability.Range, Radius = 1.4, Damage = ability.Damage, Style = "Fireball", IgnoreArmor = ability.TrueDamage,
+		OnEnd = function(position, hitEntity)
+			if not CombatService.Active or not ability.ExplosionRadius then
+				return
+			end
+			Net.Effect("Explosion", { Position = position, Radius = ability.ExplosionRadius, Color = ability.Color })
+			for _, victim in ipairs(enemiesInRadius(entity, position, ability.ExplosionRadius, true)) do
+				if victim ~= hitEntity then
+					CombatService.ApplyDamage(entity, victim, ability.Damage * (ability.SplashPercent or 0), { IgnoreArmor = ability.TrueDamage })
+				end
+			end
+		end,
+	})
+	return true
+end
+
+handlers.FrostNova = function(entity, ability, origin)
+	CombatService.BreakStealth(entity)
+	Net.Effect("Shockwave", { Position = origin, Radius = ability.Radius, Color = ability.Color })
+	for _, victim in ipairs(enemiesInRadius(entity, origin, ability.Radius, true)) do
+		CombatService.ApplyDamage(entity, victim, ability.Damage, { IgnoreArmor = ability.TrueDamage })
+		if victim.Alive then
+			CombatService.Stun(victim, ability.Stun)
+			Net.Effect("Stun", { Position = CombatService.GetPosition(victim), Duration = ability.Stun })
+		end
+	end
+	return true
+end
+
+handlers.PiercingArrow = function(entity, ability, origin, aimPosition)
+	local direction = Util.FlatDirection(origin, aimPosition, entity.Root.CFrame.LookVector)
+	CombatService.BreakStealth(entity)
+	CombatService.FireProjectile({
+		Owner = entity, Origin = origin + direction * 1.5, Direction = direction, Speed = ability.Speed,
+		Range = ability.Range, Radius = 1.2, Damage = ability.Damage, Style = "PowerShot", Pierce = true, Crit = true,
+	})
+	return true
+end
+
+handlers.Tumble = function(entity, ability, origin, aimPosition, _, now)
+	local direction = Util.FlatDirection(origin, aimPosition, entity.Root.CFrame.LookVector)
+	CombatService.Dash(entity, direction, ability.Range, 0.2)
+	entity.NextAttackMultiplier = ability.Empower
+	entity.NextAttackExpires = now + ability.Duration
+	if entity.Model then
+		entity.Model:SetAttribute("EmpoweredAttack", true)
+	end
+	return true
+end
+
+handlers.ShieldBash = function(entity, ability, origin, aimPosition)
+	local direction = Util.FlatDirection(origin, aimPosition, entity.Root.CFrame.LookVector)
+	local cosHalfArc = math.cos(math.rad(ability.Arc / 2))
+	CombatService.BreakStealth(entity)
+	Net.Effect("Melee", { Origin = origin, Direction = direction, Range = ability.Range, Arc = ability.Arc, Color = ability.Color, Empowered = true })
+	for _, victim in ipairs(enemiesInRadius(entity, origin, ability.Range, true)) do
+		local offset = Util.Flat(CombatService.GetPosition(victim) - origin)
+		if offset.Magnitude <= victim.Radius + 1 or offset.Unit:Dot(direction) >= cosHalfArc then
+			CombatService.ApplyDamage(entity, victim, ability.Damage)
+			if victim.Alive then
+				CombatService.Stun(victim, ability.Stun)
+				Net.Effect("Stun", { Position = CombatService.GetPosition(victim), Duration = ability.Stun })
+			end
+		end
+	end
+	return true
+end
+
+handlers.RallyingHorn = function(entity, ability, origin)
+	Net.Effect("Shockwave", { Position = origin, Radius = ability.Radius, Color = ability.Color })
+	for _, ally in ipairs(CombatService.GetEntitiesInRadius(origin, ability.Radius, function(candidate)
+		return candidate.Kind == "Hero" and candidate.Team == entity.Team
+	end)) do
+		CombatService.AddShield(ally, ability.Shield, ability.Duration)
+	end
+	return true
+end
+
+handlers.Whirlwind = function(entity, ability, origin)
+	CombatService.BreakStealth(entity)
+	Net.Effect("Shockwave", { Position = origin, Radius = ability.Radius, Color = ability.Color })
+	Net.Effect("Melee", { Origin = origin, Direction = entity.Root.CFrame.LookVector, Range = ability.Radius, Arc = 360, Color = ability.Color, Empowered = true })
+	for _, victim in ipairs(enemiesInRadius(entity, origin, ability.Radius, false)) do
+		CombatService.ApplyDamage(entity, victim, ability.Damage)
+	end
+	return true
+end
+
+handlers.CrushingLeap = function(entity, ability, origin, aimPosition)
+	local offset = Util.Flat(aimPosition - origin)
+	local distance = math.min(offset.Magnitude, ability.Range)
+	local direction = offset.Magnitude > 0.1 and offset.Unit or Util.Flat(entity.Root.CFrame.LookVector)
+	CombatService.BreakStealth(entity)
+	local landing = CombatService.Dash(entity, direction, distance, 0.35) or origin
+	task.delay(0.35, function()
+		if not CombatService.Active or not entity.Alive then
+			return
+		end
+		Net.Effect("Explosion", { Position = landing, Radius = ability.Radius, Color = ability.Color })
+		for _, victim in ipairs(enemiesInRadius(entity, landing, ability.Radius, true)) do
+			CombatService.ApplyDamage(entity, victim, ability.Damage)
+			if victim.Alive then
+				CombatService.Stun(victim, ability.Stun)
+			end
+		end
+	end)
+	return true
+end
+
+handlers.SummonGolem = function(entity, ability, origin)
+	local module = script.Parent:FindFirstChild("CreepService")
+	local creepService = module and require(module)
+	if not creepService or not creepService.SpawnGolem then
+		return false, "Golems are unavailable"
+	end
+	local ok, reason = creepService.SpawnGolem(entity, ability)
+	if not ok then
+		return false, reason
+	end
+	Net.Effect("Explosion", { Position = origin, Radius = 6, Color = ability.Color })
+	return true
+end
+
+-- Attack speed item abilities -------------------------------------------------------
+handlers.Frenzy = function(entity, ability, origin, _, _, now)
+	entity.FrenzyUntil = now + ability.Duration
+	entity.FrenzyAttackSpeed = ability.AttackSpeedBoost or 0
+	Net.Effect("Shockwave", { Position = origin, Radius = 5, Color = ability.Color })
+	return true
+end
+
+handlers.BladeFlurry = function(entity, ability, origin, aimPosition)
+	local direction = Util.FlatDirection(origin, aimPosition, entity.Root.CFrame.LookVector)
+	CombatService.BreakStealth(entity)
+	CombatService.MeleeStrike(entity, origin, direction, ability.Range, ability.Arc, ability.Damage, true, true)
+	return true
+end
+
+handlers.ArcaneSurge = function(entity, ability, origin)
+	CombatService.BreakStealth(entity)
+	Net.Effect("Shockwave", { Position = origin, Radius = ability.Radius, Color = ability.Color })
+	for _, victim in ipairs(enemiesInRadius(entity, origin, ability.Radius, true)) do
+		CombatService.ApplyDamage(entity, victim, ability.Damage, { IgnoreArmor = ability.TrueDamage })
+	end
+	return true
+end
+
+handlers.Quickdraw = function(entity, ability, origin, aimPosition)
+	local direction = Util.FlatDirection(origin, aimPosition, entity.Root.CFrame.LookVector)
+	CombatService.BreakStealth(entity)
+	CombatService.FireProjectile({
+		Owner = entity, Origin = origin + direction * 1.5, Direction = direction, Speed = ability.Speed,
+		Range = ability.Range, Radius = 1.2, Damage = ability.Damage, Style = "PowerShot", Pierce = true,
+	})
+	return true
+end
+
+handlers.IronFrenzy = function(entity, ability, origin, _, _, now)
+	CombatService.AddShield(entity, ability.Shield, ability.Duration)
+	entity.FrenzyUntil = now + ability.Duration
+	entity.FrenzyAttackSpeed = ability.AttackSpeedBoost or 0
+	Net.Effect("Shockwave", { Position = origin, Radius = 5, Color = ability.Color })
+	return true
+end
+
+handlers.BloodFury = function(entity, ability, origin, _, _, now)
+	CombatService.BreakStealth(entity)
+	Net.Effect("Shockwave", { Position = origin, Radius = ability.Radius, Color = ability.Color })
+	Net.Effect("Melee", { Origin = origin, Direction = entity.Root.CFrame.LookVector, Range = ability.Radius, Arc = 360, Color = ability.Color, Empowered = true })
+	for _, victim in ipairs(enemiesInRadius(entity, origin, ability.Radius, false)) do
+		CombatService.ApplyDamage(entity, victim, ability.Damage)
+	end
+	entity.FrenzyUntil = now + ability.Duration
+	entity.FrenzyAttackSpeed = ability.AttackSpeedBoost or 0
+	return true
+end
+
+-- Boot skills (right mouse) ------------------------------------------------------------
+-- Every class has 5 boots: crowd control, attack speed, movement, damage and mobility.
+-- They are built from the shared combat mechanics (damage, stun, slow, haste, stealth,
+-- shields, dashes, pushes, frenzy, empowered attacks, reflect).
+
+-- enemies (units) whose centre lies within `width` of the segment origin -> origin + direction * length
+local function lineVictims(entity, origin, direction, length, width)
+	local results = {}
+	for _, candidate in pairs(CombatService.Entities) do
+		if isUnitEnemy(entity, candidate) then
+			local offset = Util.Flat(CombatService.GetPosition(candidate) - origin)
+			local along = offset:Dot(direction)
+			if along >= -candidate.Radius and along <= length + candidate.Radius then
+				local closest = direction * math.clamp(along, 0, length)
+				if (offset - closest).Magnitude <= width + candidate.Radius then
+					table.insert(results, { Entity = candidate, Along = along })
+				end
+			end
+		end
+	end
+	table.sort(results, function(a, b)
+		return a.Along < b.Along
+	end)
+	return results
+end
+
+-- how far a straight shot travels from origin before it meets a wall
+local function rayLength(origin, direction, range)
+	local from = Vector3.new(origin.X, 3, origin.Z)
+	local hit = workspace:Raycast(from, direction * range, CombatService.GetObstacleParams())
+	return hit and Util.FlatDistance(from, hit.Position) or range
+end
+
+-- Unit-targeted boot skills: a visible, living enemy within range and line of sight
+local function validUnitTarget(entity, ability, origin, targetId)
+	local target = type(targetId) == "string" and CombatService.GetEntity(targetId) or nil
+	if not isUnitEnemy(entity, target) then
+		return nil, "Select a living enemy"
+	end
+	if CombatService.IsStealthed(target) and not CombatService.IsRevealedTo(target, entity.Team) then
+		return nil, "Target is not visible"
+	end
+	local targetPosition = CombatService.GetPosition(target)
+	if Util.FlatDistance(origin, targetPosition) > ability.Range + target.Radius then
+		return nil, "Target out of range"
+	end
+	if not CombatService.HasLineOfSight(origin, targetPosition) then
+		return nil, "No line of sight"
+	end
+	return target, targetPosition
+end
+
+local function frenzy(entity, ability, now)
+	entity.FrenzyUntil = now + ability.Duration
+	entity.FrenzyAttackSpeed = ability.AttackSpeedBoost or 0
+end
+
+local function empower(entity, ability, now)
+	entity.NextAttackMultiplier = ability.Empower
+	entity.NextAttackExpires = now + ability.Duration
+	if entity.Model then
+		entity.Model:SetAttribute("EmpoweredAttack", true)
+	end
+end
+
+local function pointInRange(origin, aimPosition, range)
+	local offset = Util.Flat(aimPosition - origin)
+	if offset.Magnitude > range then
+		offset = offset.Unit * range
+	end
+	return Vector3.new(origin.X + offset.X, 0.2, origin.Z + offset.Z), offset
+end
+
+-- Reworked mythic skills ---------------------------------------------------------------------
+-- Mage (all ranged): Glacial Prison (ground-target freeze), Arcane Barrage (point-and-click bolts)
+handlers.GlacialPrison = function(entity, ability, origin, aimPosition)
+	local center = pointInRange(origin, aimPosition, ability.Range)
+	CombatService.BreakStealth(entity)
+	Net.Effect("Telegraph", { Position = center, Radius = ability.Radius, Duration = ability.Delay, Color = ability.Color })
+	task.delay(ability.Delay, function()
+		if not CombatService.Active or not entity.Alive then
+			return
+		end
+		Net.Effect("Explosion", { Position = center, Radius = ability.Radius, Color = ability.Color })
+		for _, victim in ipairs(enemiesInRadius(entity, center, ability.Radius, true)) do
+			CombatService.ApplyDamage(entity, victim, ability.Damage, { IgnoreArmor = ability.TrueDamage })
+			if victim.Alive then
+				CombatService.Stun(victim, ability.Stun, entity)
+				Net.Effect("Stun", { Position = CombatService.GetPosition(victim), Duration = ability.Stun })
+			end
+		end
+	end)
+	return true
+end
+
+handlers.ArcaneBarrage = function(entity, ability, origin, _, targetId)
+	local target, reason = validUnitTarget(entity, ability, origin, targetId)
+	if not target then
+		return false, reason
+	end
+	CombatService.BreakStealth(entity)
+	for bolt = 1, ability.Bolts do
+		task.delay((bolt - 1) * ability.Interval, function()
+			if not CombatService.Active or not entity.Alive or not target.Alive then
+				return
+			end
+			local from, to = CombatService.GetPosition(entity), CombatService.GetPosition(target)
+			if Util.FlatDistance(from, to) > ability.Range + target.Radius + 6 then
+				return -- the target ran out of range: the remaining bolts fizzle
+			end
+			Net.Effect("Lightning", { From = from, To = to, Color = ability.Color })
+			CombatService.ApplyDamage(entity, target, ability.Damage, { IgnoreArmor = ability.TrueDamage })
+		end)
+	end
+	return true
+end
+
+-- Assassin: a fan of thrown knives (each knife stops at the first enemy it hits)
+handlers.FanOfKnives = function(entity, ability, origin, aimPosition)
+	local direction = Util.FlatDirection(origin, aimPosition, entity.Root.CFrame.LookVector)
+	CombatService.BreakStealth(entity)
+	local count = ability.Knives or 5
+	for index = 1, count do
+		local angle = math.rad(ability.Spread or 40) * ((index - 1) / math.max(1, count - 1) - 0.5)
+		local knifeDirection = CFrame.fromAxisAngle(Vector3.yAxis, angle):VectorToWorldSpace(direction)
+		CombatService.FireProjectile({
+			Owner = entity, Origin = origin + knifeDirection * 1.2, Direction = knifeDirection, Speed = ability.Speed,
+			Range = ability.Range, Radius = 1.0, Damage = ability.Damage, Style = "Knife",
+		})
+	end
+	return true
+end
+
+-- Marksman: three quick arrows toward the cursor
+handlers.RapidVolley = function(entity, ability, origin, aimPosition)
+	CombatService.BreakStealth(entity)
+	for arrow = 1, ability.Arrows or 3 do
+		task.delay((arrow - 1) * (ability.Interval or 0.15), function()
+			if not CombatService.Active or not entity.Alive or CombatService.IsStunned(entity) then
+				return
+			end
+			local from = CombatService.GetPosition(entity)
+			local direction = Util.FlatDirection(from, aimPosition, entity.Root.CFrame.LookVector)
+			CombatService.FireProjectile({
+				Owner = entity, Origin = from + direction * 1.5, Direction = direction, Speed = ability.Speed,
+				Range = ability.Range, Radius = 1.1, Damage = ability.Damage, Style = "Arrow",
+			})
+		end)
+	end
+	return true
+end
+
+-- Fighter: war drums - attack speed + move speed for you and nearby allies, slow nearby enemies
+handlers.DrumsOfWar = function(entity, ability, origin, _, _, now)
+	CombatService.BreakStealth(entity)
+	Net.Effect("Shockwave", { Position = origin, Radius = ability.Radius, Color = ability.Color })
+	for _, ally in ipairs(CombatService.GetEntitiesInRadius(origin, ability.Radius, function(candidate)
+		return candidate.Kind == "Hero" and candidate.Alive and candidate.Team == entity.Team
+	end)) do
+		-- keep a stronger frenzy the ally already has
+		if (ally.FrenzyUntil or 0) <= now or (ally.FrenzyAttackSpeed or 0) <= ability.AttackSpeedBoost then
+			ally.FrenzyUntil = now + ability.Duration
+			ally.FrenzyAttackSpeed = ability.AttackSpeedBoost
+		end
+		CombatService.Haste(ally, ability.HasteBonus, ability.Duration)
+		CombatService.PushHeroAttributes(ally)
+	end
+	for _, victim in ipairs(enemiesInRadius(entity, origin, ability.SlowRadius, true)) do
+		CombatService.Slow(victim, ability.Slow, ability.SlowDuration, entity)
+	end
+	return true
+end
+
+-- Assassin: CC / attack speed / movement / mobility (damage = Assassin Boots' Point Strike)
+handlers.CripplingStrike = function(entity, ability, origin, aimPosition)
+	local direction = Util.FlatDirection(origin, aimPosition, entity.Root.CFrame.LookVector)
+	local cosHalfArc = math.cos(math.rad(ability.Arc / 2))
+	CombatService.BreakStealth(entity)
+	Net.Effect("Melee", { Origin = origin, Direction = direction, Range = ability.Range, Arc = ability.Arc, Color = ability.Color, Empowered = true })
+	for _, victim in ipairs(enemiesInRadius(entity, origin, ability.Range, true)) do
+		local position = CombatService.GetPosition(victim)
+		local offset = Util.Flat(position - origin)
+		if (offset.Magnitude <= victim.Radius + 1 or offset.Unit:Dot(direction) >= cosHalfArc) and CombatService.HasLineOfSight(origin, position) then
+			CombatService.ApplyDamage(entity, victim, ability.Damage)
+			if victim.Alive then
+				CombatService.Slow(victim, ability.Slow, ability.SlowDuration, entity)
+			end
+		end
+	end
+	return true
+end
+
+handlers.BladeDance = function(entity, ability, origin, _, _, now)
+	frenzy(entity, ability, now)
+	CombatService.Haste(entity, ability.HasteBonus, ability.Duration)
+	Net.Effect("Shockwave", { Position = origin, Radius = 5, Color = ability.Color })
+	return true
+end
+
+handlers.Vanish = function(entity, ability, origin)
+	Net.Effect("Stealth", { Position = origin, Color = ability.Color })
+	CombatService.SetStealth(entity, ability.Duration)
+	CombatService.Haste(entity, ability.HasteBonus, ability.Duration)
+	return true
+end
+
+handlers.ShadeLeap = function(entity, ability, origin, _, targetId)
+	local target, targetPosition = validUnitTarget(entity, ability, origin, targetId)
+	if not target then
+		return false, targetPosition
+	end
+	local toTarget = Util.Flat(targetPosition - origin)
+	local forward = toTarget.Magnitude > 0.1 and toTarget.Unit or Util.Flat(entity.Root.CFrame.LookVector)
+	local travel = toTarget + forward * (target.Radius + 2.5) -- land just behind the target
+	Net.Effect("Stealth", { Position = origin, Color = ability.Color })
+	CombatService.Dash(entity, travel.Unit, travel.Magnitude, 0.1)
+	return true
+end
+
+-- Mage: CC (push) / attack speed / movement / damage / mobility
+handlers.GaleBurst = function(entity, ability, origin, aimPosition)
+	local center, offset = pointInRange(origin, aimPosition, ability.Range)
+	local fallback = offset.Magnitude > 0.1 and offset.Unit or Util.Flat(entity.Root.CFrame.LookVector)
+	CombatService.BreakStealth(entity)
+	Net.Effect("GalePush", { Position = center, Radius = ability.Radius, Duration = ability.Duration, Color = ability.Color })
+	Net.Effect("Shockwave", { Position = center, Radius = ability.Radius, Color = ability.Color })
+	for _, victim in ipairs(enemiesInRadius(entity, center, ability.Radius, true)) do
+		CombatService.ApplyDamage(entity, victim, ability.Damage, { IgnoreArmor = ability.TrueDamage })
+		if victim.Alive then
+			local away = Util.Flat(CombatService.GetPosition(victim) - center)
+			CombatService.Dash(victim, away.Magnitude > 0.3 and away.Unit or fallback, ability.PushDistance, ability.Duration)
+		end
+	end
+	return true
+end
+
+handlers.ArcaneTempo = function(entity, ability, origin, _, _, now)
+	CombatService.BreakStealth(entity)
+	Net.Effect("Shockwave", { Position = origin, Radius = ability.Radius, Color = ability.Color })
+	for _, victim in ipairs(enemiesInRadius(entity, origin, ability.Radius, true)) do
+		CombatService.ApplyDamage(entity, victim, ability.Damage, { IgnoreArmor = ability.TrueDamage })
+	end
+	frenzy(entity, ability, now)
+	return true
+end
+
+handlers.Tailwind = function(entity, ability, origin)
+	Net.Effect("Shockwave", { Position = origin, Radius = ability.Radius, Color = ability.Color })
+	for _, ally in ipairs(CombatService.GetEntitiesInRadius(origin, ability.Radius, function(candidate)
+		return candidate.Kind == "Hero" and candidate.Team == entity.Team
+	end)) do
+		CombatService.Haste(ally, ability.HasteBonus, ability.Duration)
+	end
+	return true
+end
+
+handlers.SearingRay = function(entity, ability, origin, aimPosition)
+	local direction = Util.FlatDirection(origin, aimPosition, entity.Root.CFrame.LookVector)
+	local length = rayLength(origin, direction, ability.Range)
+	local finish = origin + direction * length
+	CombatService.BreakStealth(entity)
+	Net.Effect("Dash", { From = origin, To = finish, Color = ability.Color })
+	Net.Effect("Lightning", { From = origin, To = finish, Color = ability.Color })
+	Net.Effect("Explosion", { Position = finish, Radius = 2.5, Color = ability.Color })
+	for _, hit in ipairs(lineVictims(entity, origin, direction, length, ability.Width)) do
+		CombatService.ApplyDamage(entity, hit.Entity, ability.Damage, { IgnoreArmor = ability.TrueDamage })
+	end
+	return true
+end
+
+handlers.PhaseShift = function(entity, ability, origin, aimPosition)
+	local direction = Util.FlatDirection(origin, aimPosition, entity.Root.CFrame.LookVector)
+	local distance = math.clamp(Util.FlatDistance(origin, aimPosition), 4, ability.Range)
+	Net.Effect("Stealth", { Position = origin, Color = ability.Color })
+	CombatService.Dash(entity, direction, distance, 0.08)
+	CombatService.AddShield(entity, ability.Shield, ability.Duration)
+	return true
+end
+
+-- Marksman: CC / attack speed / movement / damage (mobility = Ranger Boots' Tumble)
+handlers.PinningShot = function(entity, ability, origin, aimPosition)
+	local direction = Util.FlatDirection(origin, aimPosition, entity.Root.CFrame.LookVector)
+	local length = rayLength(origin, direction, ability.Range)
+	CombatService.BreakStealth(entity)
+	local first = lineVictims(entity, origin, direction, length, ability.Width)[1]
+	local victim = first and first.Entity
+	local finish = victim and CombatService.GetPosition(victim) or (origin + direction * length)
+	Net.Effect("PointStrike", { From = origin, Position = finish, Color = ability.Color })
+	if victim then
+		CombatService.ApplyDamage(entity, victim, ability.Damage)
+		if victim.Alive then
+			CombatService.Stun(victim, ability.Stun, entity)
+			Net.Effect("Stun", { Position = CombatService.GetPosition(victim), Duration = ability.Stun })
+		end
+	end
+	return true
+end
+
+handlers.DeadeyeRhythm = function(entity, ability, origin, _, _, now)
+	frenzy(entity, ability, now)
+	empower(entity, ability, now)
+	Net.Effect("Shockwave", { Position = origin, Radius = 5, Color = ability.Color })
+	return true
+end
+
+handlers.EvasiveStride = function(entity, ability, origin)
+	CombatService.Haste(entity, ability.HasteBonus, ability.Duration)
+	CombatService.AddShield(entity, ability.Shield, ability.Duration)
+	Net.Effect("Shockwave", { Position = origin, Radius = 5, Color = ability.Color })
+	return true
+end
+
+handlers.RainOfArrows = function(entity, ability, origin, aimPosition)
+	local center = pointInRange(origin, aimPosition, ability.Range)
+	CombatService.BreakStealth(entity)
+	Net.Effect("Telegraph", { Position = center, Radius = ability.Radius, Duration = ability.Delay, Color = ability.Color })
+	local damage = ability.Damage
+	task.delay(ability.Delay, function()
+		if not CombatService.Active then
+			return
+		end
+		Net.Effect("Explosion", { Position = center, Radius = ability.Radius, Color = ability.Color })
+		for _, victim in ipairs(enemiesInRadius(entity, center, ability.Radius, true)) do
+			CombatService.ApplyDamage(entity, victim, damage)
+		end
+	end)
+	return true
+end
+
+-- Tank: CC (stun scaled with max health) / attack speed / movement / mobility (damage = Tank Boots)
+handlers.EarthenShackles = function(entity, ability, origin)
+	local duration = ItemDefinitions.GetScaledStun(ability, entity.MaxHealth)
+	CombatService.BreakStealth(entity)
+	Net.Effect("Shockwave", { Position = origin, Radius = ability.Radius, Color = ability.Color })
+	Net.Effect("Explosion", { Position = origin, Radius = ability.Radius * 0.6, Color = ability.Color })
+	for _, victim in ipairs(enemiesInRadius(entity, origin, ability.Radius, true)) do
+		CombatService.Stun(victim, duration, entity)
+		Net.Effect("Stun", { Position = CombatService.GetPosition(victim), Duration = duration })
+	end
+	return true
+end
+
+handlers.ThornedRhythm = function(entity, ability, origin, _, _, now)
+	frenzy(entity, ability, now)
+	entity.ReflectUntil = now + ability.Duration
+	entity.ReflectPercent = ability.ReflectPercent
+	if entity.Model then
+		entity.Model:SetAttribute("ThornsUntil", entity.ReflectUntil)
+	end
+	Net.Effect("SpikedScale", { EntityId = entity.Id, Position = origin, Duration = ability.Duration, Color = ability.Color })
+	return true
+end
+
+handlers.UnstoppableMarch = function(entity, ability, origin)
+	CombatService.SetUnstoppable(entity, ability.Duration)
+	CombatService.Haste(entity, ability.HasteBonus, ability.Duration)
+	Net.Effect("Shockwave", { Position = origin, Radius = 6, Color = ability.Color })
+	return true
+end
+
+handlers.ShoulderCharge = function(entity, ability, origin, aimPosition)
+	local direction = Util.FlatDirection(origin, aimPosition, entity.Root.CFrame.LookVector)
+	CombatService.BreakStealth(entity)
+	local finish = CombatService.Dash(entity, direction, ability.Range, 0.25) or origin
+	local length = Util.FlatDistance(origin, finish)
+	local side = Vector3.new(-direction.Z, 0, direction.X)
+	for _, hit in ipairs(lineVictims(entity, origin, direction, length, ability.Width)) do
+		local victim = hit.Entity
+		CombatService.ApplyDamage(entity, victim, ability.Damage)
+		if victim.Alive then
+			local offset = Util.Flat(CombatService.GetPosition(victim) - origin)
+			CombatService.Dash(victim, offset:Dot(side) >= 0 and side or -side, ability.KnockDistance, 0.25)
+		end
+	end
+	Net.Effect("Shockwave", { Position = finish, Radius = 4, Color = ability.Color })
+	return true
+end
+
+-- Fighter: attack speed / movement / damage / mobility (CC = Fighter Boots' Heavy Kick)
+handlers.BattleTrance = function(entity, ability, origin, _, _, now)
+	frenzy(entity, ability, now)
+	CombatService.Heal(entity, ability.Heal or 0, true)
+	Net.Effect("Shockwave", { Position = origin, Radius = 5, Color = ability.Color })
+	return true
+end
+
+handlers.Warpath = function(entity, ability, origin, _, _, now)
+	CombatService.Haste(entity, ability.HasteBonus, ability.Duration)
+	empower(entity, ability, now)
+	Net.Effect("Shockwave", { Position = origin, Radius = 6, Color = ability.Color })
+	return true
+end
+
+handlers.SkullSplitter = function(entity, ability, origin, _, targetId)
+	local target, targetPosition = validUnitTarget(entity, ability, origin, targetId)
+	if not target then
+		return false, targetPosition
+	end
+	CombatService.BreakStealth(entity)
+	local toTarget = Util.Flat(targetPosition - origin)
+	local gap = toTarget.Magnitude - (target.Radius + 2)
+	if gap > 0.5 then
+		CombatService.Dash(entity, toTarget.Unit, gap, 0.2)
+	end
+	local damage = ability.Damage
+	task.delay(0.2, function()
+		if not CombatService.Active or not entity.Alive or not target.Alive then
+			return
+		end
+		local execute = target.Health / math.max(1, target.MaxHealth) < ability.ExecuteThreshold
+		Net.Effect("HeavyKick", { Origin = CombatService.GetPosition(entity), Position = CombatService.GetPosition(target), Color = ability.Color })
+		CombatService.ApplyDamage(entity, target, execute and damage * (1 + ability.ExecuteBonus) or damage, { Crit = execute })
+	end)
+	return true
+end
+
+handlers.LeapingBound = function(entity, ability, origin, aimPosition)
+	local offset = Util.Flat(aimPosition - origin)
+	local direction = offset.Magnitude > 0.1 and offset.Unit or Util.Flat(entity.Root.CFrame.LookVector)
+	CombatService.Dash(entity, direction, ability.Range, 0.3)
+	CombatService.Haste(entity, ability.HasteBonus, ability.Duration + 0.3)
+	return true
+end
+
+-- slot: 1 (E) or 2 (R). targetId only matters for Unit-targeted abilities.
+function ItemService.UseSlot(entity, slot, aimPosition, targetId)
+	if not CombatService.Active or not entity or not entity.Alive or entity.Kind ~= "Hero" or not entity.Participant then
+		return false, "Unavailable"
+	end
+	if not isValidSlot(slot) and slot ~= BOOT_SLOT then
+		return false, "Invalid slot"
+	end
+	local participant = entity.Participant
+	local mythics = mythicsOf(participant) -- also guarantees participant.ItemReadyAt
+	local itemId = slot == BOOT_SLOT and participant.Boots or mythics[slot]
+	local ability = ItemDefinitions.GetItemAbility(itemId)
+	if not ability then
+		return false, slot == BOOT_SLOT and "Boot slot is empty - buy boots in the shop" or ("Mythic slot " .. slot .. " is empty")
+	end
+	local handler = handlers[ability.Id]
+	if not handler then
+		return false, "Ability not implemented"
+	end
+	local now = Util.Now()
+	if CombatService.IsStunned(entity) and not ability.UsableWhileStunned then
+		return false, "Stunned"
+	end
+	local readyAt = participant.ItemReadyAt[itemId] or 0
+	if now < readyAt - COOLDOWN_GRACE then
+		return false, "Cooldown"
+	end
+	-- E / R item skills cost mana (boots only when their skill sets ManaCost - all Mage boots);
+	-- spent only when the skill succeeds
+	local manaCost = ItemDefinitions.GetSlotManaCost(ability, slot == BOOT_SLOT)
+	if manaCost > 0 and (entity.Mana or 0) < manaCost then
+		return false, "Not enough mana"
+	end
+	local origin = CombatService.GetPosition(entity)
+	participant.ItemReadyAt[itemId] = now + CombatService.GetCooldown(entity, ability.Cooldown) -- set first: rejects re-entrant spam
+	-- handlers get a copy whose Damage / Shield are numbers scaled from the caster's current stats
+	local resolved = AbilityScaling.Resolve(ability, AbilityScaling.StatsFromEntity(entity))
+	local ok, reason = handler(entity, resolved, origin, aimPosition, targetId, now)
+	if ok == false then
+		participant.ItemReadyAt[itemId] = readyAt
+		return false, reason
+	end
+	if manaCost > 0 then
+		CombatService.SpendMana(entity, manaCost)
+	end
+	if entity.Model then
+		entity.Model:SetAttribute("ItemCastAbility", ability.Id)
+		entity.Model:SetAttribute("ItemCastAt", now)
+	end
+	MatchManager.Broadcast()
+	return true
+end
+
+-- Creep war band purchase is delegated to CreepService (loaded lazily when present)
+local function getCreepService()
+	local module = script.Parent:FindFirstChild("CreepService")
+	return module and require(module) or nil
+end
+
+function ItemService.HandleRequest(player, action, arg1, arg2)
+	if type(action) ~= "string" then
+		return false
+	end
+	local now = os.clock()
+	if now - (lastRequest[player] or 0) < REQUEST_INTERVAL then
+		return false
+	end
+	lastRequest[player] = now
+	local participant = PlayerService.GetParticipantByPlayer(player)
+	if not participant or participant.Spectator then
+		return false
+	end
+	if action == "Buy" then
+		if type(arg1) ~= "string" or (arg2 ~= nil and type(arg2) ~= "number") then
+			return false
+		end
+		return ItemService.Buy(player, participant, arg1, arg2)
+	elseif action == "Sell" then
+		return ItemService.Sell(player, participant, arg1)
+	elseif action == "Swap" then
+		return ItemService.Swap(player, participant)
+	elseif action == "UpgradeMinions" or action == "BuyCreeps" then
+		-- team-wide minion upgrade (minion waves themselves spawn automatically)
+		local creepService = getCreepService()
+		if not creepService then
+			return reject(player, "Minion upgrades are not available yet")
+		end
+		return creepService.PurchaseUpgrade(player, participant)
+	end
+	return false
+end
+
+-- Public API ----------------------------------------------------------------------------
+function ItemService.Init()
+	Net.Get("ItemRequest").OnServerEvent:Connect(function(player, action, arg1, arg2)
+		local ok, err = pcall(ItemService.HandleRequest, player, action, arg1, arg2)
+		if not ok then
+			warn("[Ruinfall] ItemRequest error:", err)
+		end
+	end)
+end
+
+function ItemService.GetSlots(participant)
+	local mythics = mythicsOf(participant)
+	local passives = passivesOf(participant)
+	return mythics[1], mythics[2], participant.Boots, passives[1], passives[2], passives[3]
+end
+
+return ItemService
