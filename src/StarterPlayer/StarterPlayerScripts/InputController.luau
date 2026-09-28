@@ -1,25 +1,45 @@
--- InputController: desktop bindings.
---   WASD        move (Roblox character controls, camera-relative)
---   Left click  basic attack toward cursor (hold to keep attacking)
---   Q           signature ability
---   E / R       item abilities from Mythic slot 1 / slot 2 (dynamic, follow the slots)
---   Right click boot skill (the separate boot slot) - movement is WASD only
---   B           item shop (ShopUI)
+-- InputController: desktop bindings. Hotkeys come from GameSettings (rebindable in the
+-- SETTINGS menu); the defaults are:
+--   WASD        move (Roblox character controls, camera-relative) - fixed
+--   Left click  basic attack toward cursor (hold to keep attacking) - fixed
+--   Q           class ability
+--   SPACE/E/R   active items from mythic slots 3 / 1 / 2 (dynamic, follow the slots)
+--   Right click boot skill (the separate boot slot)
+--   (Shop B, potion H and the Royale gear panel I are handled by ShopUI / RoyaleUI.)
 --   While choosing a unit target: left click confirms; the same key again or Esc cancels
---   (right click also cancels an E/R target selection).
+--   (the boots key also cancels an item target selection).
 
 -- Services
 local UserInputService = game:GetService("UserInputService")
+local ContextActionService = game:GetService("ContextActionService")
+
+local GameSettings = require(script.Parent:WaitForChild("GameSettings"))
+
+-- Constants
+local COMBAT_ACTIONS = { Ability = "Q", ItemE = "E", ItemR = "R", ItemSpace = "SPACE", Boots = "M2" }
 
 -- State
 local InputController = {}
 local CombatController = nil
 
+local function runAction(action)
+	local slot = COMBAT_ACTIONS[action]
+	if not slot then
+		return false
+	end
+	if slot == "M2" and CombatController.Targeting and CombatController.Targeting.Key ~= "M2" then
+		CombatController.CancelTargeting()
+		return true
+	end
+	CombatController.TryAbility(slot) -- pressing the same key again cancels its targeting
+	return true
+end
+
 -- Public API
 function InputController.Init(combatController)
 	CombatController = combatController
 	UserInputService.InputBegan:Connect(function(input, gameProcessed)
-		if gameProcessed then
+		if gameProcessed or GameSettings.Capturing then
 			return
 		end
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -29,26 +49,22 @@ function InputController.Init(combatController)
 			end
 			CombatController.SetAttackHeld(true)
 			CombatController.TryAttack()
-		elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
-			if CombatController.Targeting and CombatController.Targeting.Key ~= "M2" then
-				CombatController.CancelTargeting()
-				return
-			end
-			CombatController.TryAbility("M2") -- boot skill (pressing again cancels its targeting)
-		elseif input.KeyCode == Enum.KeyCode.Escape then
-			CombatController.CancelTargeting()
-		elseif input.KeyCode == Enum.KeyCode.Q then
-			CombatController.TryAbility("Q")
-		elseif input.KeyCode == Enum.KeyCode.E then
-			CombatController.TryAbility("E")
-		elseif input.KeyCode == Enum.KeyCode.R then
-			CombatController.TryAbility("R")
+			return
 		end
+		if input.KeyCode == Enum.KeyCode.Escape then
+			CombatController.CancelTargeting()
+			return
+		end
+		if input.KeyCode == Enum.KeyCode.Space then
+			return -- handled by the Space action below (it also blocks the default jump)
+		end
+		runAction(GameSettings.ActionFor(input))
 	end)
-	-- SPACE = third active item. Bound above the default jump action so it never jumps.
-	game:GetService("ContextActionService"):BindActionAtPriority("RuinfallSpaceItem", function(_, state)
-		if state == Enum.UserInputState.Begin and not UserInputService:GetFocusedTextBox() then
-			CombatController.TryAbility("SPACE")
+	-- Space is Roblox's jump key: bind it above the default jump so it never jumps, and run
+	-- whatever combat action is bound to it (SPACE item by default)
+	ContextActionService:BindActionAtPriority("RuinfallSpaceKey", function(_, state, input)
+		if state == Enum.UserInputState.Begin and not UserInputService:GetFocusedTextBox() and not GameSettings.Capturing then
+			runAction(GameSettings.ActionFor(input))
 		end
 		return Enum.ContextActionResult.Sink
 	end, false, Enum.ContextActionPriority.High.Value + 10, Enum.KeyCode.Space)

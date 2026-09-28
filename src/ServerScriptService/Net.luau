@@ -25,6 +25,7 @@ local REMOTE_NAMES = {
 	"AudioEvent", -- audio: client Load/SaveSettings; server ("Settings", t) / ("Cue", { Cue, Position }) - see AudioService
 	"LootRequest", -- ("UsePotion") both modes; Royale: Drop / OpenChest / CloseChest / Take / PlantCross; server -> client ("Chest" / "ChestClosed", payload)
 	"RoyaleRequest", -- Royale deploy: ("Pick", Vector3 landing spot) - see RoyaleService
+	"SettingsEvent", -- game settings (hotkeys, HUD size): client Load / Save; server ("Settings", t) - see GameSettingsServer
 }
 
 -- State

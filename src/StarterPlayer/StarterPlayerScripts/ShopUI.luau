@@ -333,12 +333,13 @@ function ShopUI.new(screen, clientState)
 	end)
 	self.ReplaceDialog = dialog
 
-	-- Toggle with B
+	-- Toggle with the Shop key (B by default, rebindable in SETTINGS)
+	local GameSettings = require(script.Parent:WaitForChild("GameSettings"))
 	UserInputService.InputBegan:Connect(function(input, gameProcessed)
-		if gameProcessed then
+		if gameProcessed or GameSettings.Capturing then
 			return
 		end
-		if input.KeyCode == Enum.KeyCode.B then
+		if GameSettings.Matches(input, "Shop") then
 			local game = self.ClientState and self.ClientState.Game
 			if game and game.Royale then
 				self:SetVisible(false) -- free for all: no shop, gear comes from ruins

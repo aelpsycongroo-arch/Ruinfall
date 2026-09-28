@@ -89,6 +89,31 @@ local function findGui()
 	return gui
 end
 
+local SCALED_GROUPS = { "TopLeft", "Scoreboard", "ExtraBoards", "Minimap", "BottomHUD" }
+function HUD:ApplyUserScale()
+	local ok, GameSettings = pcall(require, script.Parent:WaitForChild("GameSettings"))
+	if not ok then
+		return
+	end
+	local scales = {}
+	for _, name in ipairs(SCALED_GROUPS) do
+		local group = self.Root:FindFirstChild(name)
+		if group and group:IsA("GuiObject") then
+			local scale = group:FindFirstChild("UserHudScale") or Instance.new("UIScale")
+			scale.Name = "UserHudScale"
+			scale.Parent = group
+			table.insert(scales, scale)
+		end
+	end
+	local function apply()
+		for _, scale in ipairs(scales) do
+			scale.Scale = GameSettings.Settings.HudScale or 1
+		end
+	end
+	apply()
+	GameSettings.Changed.Event:Connect(apply)
+end
+
 function HUD.new(_screen, clientState, combatController)
 	local self = setmetatable({}, HUD)
 	self.ClientState = clientState
@@ -123,6 +148,8 @@ function HUD.new(_screen, clientState, combatController)
 	self.ChannelFill = find(root, "Channel.Bar.Fill", "Frame")
 	self.CenterTitle = find(root, "CenterTitle", "TextLabel")
 	self.CenterSub = find(root, "CenterSub", "TextLabel")
+	-- HUD size (SETTINGS > Interface): every corner group scales around its own anchor
+	self:ApplyUserScale()
 	-- compatibility with older callers
 	self.BottomPanel = self.PlayerInfo.Group
 	self.SkillBar = self.AbilityBar.Group

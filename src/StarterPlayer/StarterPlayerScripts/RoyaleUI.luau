@@ -236,14 +236,20 @@ function RoyaleUI.new(screen, clientState)
 	local flask = circle(potion, 26, Color3.fromRGB(255, 70, 90), 0, 7)
 	flask.Position = UDim2.fromOffset(24, 23)
 	self.PotionText = Label({ Text = "x0", Font = FONTS.Title, TextSize = 20, Position = UDim2.fromOffset(44, 4), Size = UDim2.fromOffset(100, 22), ZIndex = 7, Parent = potion })
-	Label({ Text = "[H] drink", Font = FONTS.Medium, TextSize = 12, TextColor3 = COLORS.Subtext, Position = UDim2.fromOffset(44, 26), Size = UDim2.fromOffset(100, 16), ZIndex = 7, Parent = potion })
+	self.PotionKeyLabel = Label({ Text = "[H] drink", Font = FONTS.Medium, TextSize = 12, TextColor3 = COLORS.Subtext, Position = UDim2.fromOffset(44, 26), Size = UDim2.fromOffset(100, 16), ZIndex = 7, Parent = potion })
 	self.Potion = potion
 
+	local GameSettings = require(script.Parent:WaitForChild("GameSettings"))
+	local function potionKey()
+		self.PotionKeyLabel.Text = "[" .. GameSettings.Label("Potion") .. "] drink"
+	end
+	potionKey()
+	GameSettings.Changed.Event:Connect(potionKey)
 	UserInputService.InputBegan:Connect(function(input, processed)
-		if processed then
+		if processed or GameSettings.Capturing then
 			return
 		end
-		if input.KeyCode == Enum.KeyCode.I then
+		if GameSettings.Matches(input, "Gear") then
 			self.GearToggled = not self.GearToggled
 			return
 		end
@@ -256,7 +262,7 @@ function RoyaleUI.new(screen, clientState)
 				return
 			end
 		end
-		if input.KeyCode ~= Enum.KeyCode.H then
+		if not GameSettings.Matches(input, "Potion") then
 			return
 		end
 		if self.ClientState.GetMatchState() == STATE.ACTIVE then

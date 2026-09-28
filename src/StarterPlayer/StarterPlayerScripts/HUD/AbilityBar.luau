@@ -84,6 +84,13 @@ function AbilityBar.new(group, clientState, combatController)
 	self:StyleTooltip()
 	self:FitIcons()
 	self:StyleKeyBadges()
+	self:RefreshKeyBadges()
+	pcall(function()
+		local GameSettings = require(script.Parent.Parent:WaitForChild("GameSettings"))
+		GameSettings.Changed.Event:Connect(function()
+			self:RefreshKeyBadges()
+		end)
+	end)
 	self:SetupDragging()
 	return self
 end
@@ -285,6 +292,17 @@ end
 -- icon. Draw a real badge instead: parented to its slot, centred on it horizontally, resting on
 -- the slot's top edge, above everything in the slot (and large enough to hide the painted tab).
 local BADGE_Z = 12
+local SLOT_ACTIONS = { Q = "Ability", SPACE = "ItemSpace", E = "ItemE", R = "ItemR", MR = "Boots" }
+function AbilityBar:RefreshKeyBadges()
+	local ok, GameSettings = pcall(require, script.Parent.Parent:WaitForChild("GameSettings"))
+	for key, slot in pairs(self.Slots) do
+		local action = SLOT_ACTIONS[key]
+		if slot.KeyLabel and action then
+			slot.KeyLabel.Text = ok and GameSettings.Label(action) or key
+		end
+	end
+end
+
 function AbilityBar:StyleKeyBadges()
 	for _, slot in pairs(self.Slots) do
 		local badge, frame = slot.KeyLabel, slot.Frame
@@ -296,7 +314,7 @@ function AbilityBar:StyleKeyBadges()
 			-- a full-width plate: wide and tall enough to hide the old painted key tab completely
 			badge.Size = UDim2.fromScale(1.1, 0.46)
 			badge.ZIndex = BADGE_Z
-			badge.Text = slot.Def.Key
+			badge.Text = slot.Def.Key -- replaced by the player's hotkey in RefreshKeyBadges
 			badge.TextXAlignment = Enum.TextXAlignment.Center
 			badge.TextYAlignment = Enum.TextYAlignment.Center
 			badge.Font = Enum.Font.Merriweather
@@ -399,7 +417,7 @@ function AbilityBar:UpdateTooltip()
 		local item = self:GetSlotItem("M2")
 		local ability = item and ItemDefinitions.GetAbility(item.Ability)
 		setText(tip.Title, item and string.upper(item.Name) or "BOOTS")
-		setText(tip.Sub, "BOOTS  |  MR (right mouse)")
+		setText(tip.Sub, "BOOTS  |  key " .. (self.Slots.MR.KeyLabel and self.Slots.MR.KeyLabel.Text or "RMB"))
 		tip.Body.Text = item and string.format("<b>%s</b> - %s", esc(ability and ability.Name or "Ability"), esc(ability and ability.Summary or item.Description))
 			or "Empty. Buy boots in the shop (B)."
 	else
