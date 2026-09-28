@@ -289,6 +289,8 @@ function HUD:UpdateCenter(state, me, now)
 			title, color = "AWAITING RESTORATION", Color3.fromRGB(255, 190, 80)
 			sub = "Your flag is down - a teammate must re-anchor it with a Core Fragment"
 		end
+	elseif me and me.State == "Eliminated" and state.Royale then
+		title, sub = nil, nil -- RoyaleUI shows placement + spectate panel
 	elseif me and me.State == "Eliminated" then
 		title, color, sub = "ELIMINATED", Theme.Colors.Red, "Spectating - the match continues"
 	elseif me and me.Spectator then

@@ -444,6 +444,7 @@ function PlayerService.ResetForLobby()
 		participant.ManualTeam = false
 		participant.State = "Lobby"
 		participant.RespawnAt = nil
+		participant.Placement = nil
 		participant.Stats = freshStats()
 		participant.Purchases = {}
 		participant.PurchaseTimestamps = {}
@@ -563,6 +564,7 @@ function PlayerService.Serialize()
 			Spectator = participant.Spectator == true,
 			Difficulty = participant.Difficulty,
 			RespawnAt = participant.RespawnAt,
+			Placement = participant.Placement, -- Royale: final place (1 = winner)
 			IsHost = participant == host,
 			EntityId = participant.Entity and participant.Entity.Id or nil,
 			Stats = participant.Stats,

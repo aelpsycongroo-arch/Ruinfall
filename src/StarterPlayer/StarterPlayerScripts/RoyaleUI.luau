@@ -205,6 +205,29 @@ function RoyaleUI.new(screen, clientState)
 		end
 	end)
 
+	-- Eliminated (Royale): your placement, spectate other living players, leave for the hall -----
+	local spectate = Panel({ Name = "Spectate", AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -24), Size = UDim2.fromOffset(460, 176), Visible = false, ZIndex = 8, Parent = overlay })
+	UITheme.MedievalPanel(spectate, true)
+	self.SpectatePanel = spectate
+	self.PlacementText = Label({ Text = "", Font = FONTS.Title, TextSize = 34, TextColor3 = COLORS.Danger, TextXAlignment = Enum.TextXAlignment.Center, Position = UDim2.fromOffset(10, 8), Size = UDim2.new(1, -20, 0, 38), ZIndex = 9, Parent = spectate })
+	self.PlacementSub = Label({ Text = "", Font = FONTS.Medium, TextSize = 15, TextColor3 = COLORS.Subtext, TextXAlignment = Enum.TextXAlignment.Center, Position = UDim2.fromOffset(10, 46), Size = UDim2.new(1, -20, 0, 18), ZIndex = 9, Parent = spectate })
+	local function arrow(text, x, step)
+		local button = Button({ Text = text, Font = FONTS.Title, TextSize = 22, BackgroundColor3 = COLORS.PanelLight, Position = UDim2.fromOffset(x, 72), Size = UDim2.fromOffset(44, 40), ZIndex = 9, Parent = spectate }, function()
+			self:CycleSpectate(step)
+		end)
+		button.ZIndex = 9
+		return button
+	end
+	arrow("<", 14, -1)
+	arrow(">", 460 - 58, 1)
+	self.SpectateName = Label({ Text = "", Font = FONTS.Bold, TextSize = 18, TextColor3 = COLORS.Text, TextXAlignment = Enum.TextXAlignment.Center, Position = UDim2.fromOffset(64, 72), Size = UDim2.fromOffset(460 - 128, 22), TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 9, Parent = spectate })
+	Label({ Text = "A / D  or  arrow keys to switch player", Font = FONTS.Medium, TextSize = 12, TextColor3 = COLORS.Subtext, TextXAlignment = Enum.TextXAlignment.Center, Position = UDim2.fromOffset(64, 94), Size = UDim2.fromOffset(460 - 128, 16), ZIndex = 9, Parent = spectate })
+	local hall = Button({ Name = "HallButton", Text = "RETURN TO RUINFALL HALL", Font = FONTS.Title, TextSize = 18, BackgroundColor3 = Color3.fromRGB(70, 52, 90), AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 122), Size = UDim2.fromOffset(300, 42), ZIndex = 9, Parent = spectate }, function()
+		self.Remotes:WaitForChild("HubRequest"):FireServer("ReturnToHall")
+	end)
+	hall.ZIndex = 9
+	self.SpectateId = nil
+
 	-- Potion widget (both modes) -------------------------------------------------------------
 	local potion = Button({ Name = "Potion", Text = "", BackgroundColor3 = Color3.fromRGB(70, 24, 30), AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 10, 1, -200), Size = UDim2.fromOffset(150, 46), Visible = false, ZIndex = 6, Parent = screen }, function()
 		self.Remotes.LootRequest:FireServer("UsePotion")
@@ -224,6 +247,15 @@ function RoyaleUI.new(screen, clientState)
 			self.GearToggled = not self.GearToggled
 			return
 		end
+		if self.SpectatePanel.Visible then
+			if input.KeyCode == Enum.KeyCode.D or input.KeyCode == Enum.KeyCode.Right then
+				self:CycleSpectate(1)
+				return
+			elseif input.KeyCode == Enum.KeyCode.A or input.KeyCode == Enum.KeyCode.Left then
+				self:CycleSpectate(-1)
+				return
+			end
+		end
 		if input.KeyCode ~= Enum.KeyCode.H then
 			return
 		end
@@ -232,6 +264,63 @@ function RoyaleUI.new(screen, clientState)
 		end
 	end)
 	return self
+end
+
+-- Spectating (Royale, after elimination) ----------------------------------------------------------
+local function ordinal(n)
+	local tens = n % 100
+	local suffix = (tens >= 11 and tens <= 13) and "th" or ({ "st", "nd", "rd" })[n % 10] or "th"
+	return tostring(n) .. suffix
+end
+
+-- living heroes you can watch (not yourself), in a stable order
+function RoyaleUI:SpectateTargets()
+	local state = self.ClientState.Game
+	local me = self.ClientState.GetMe()
+	local list = {}
+	for _, participant in ipairs(state and state.Participants or {}) do
+		if participant.State == "Alive" and not participant.Spectator and (not me or participant.Id ~= me.Id) then
+			table.insert(list, participant)
+		end
+	end
+	table.sort(list, function(a, b)
+		return (a.Team or 0) < (b.Team or 0)
+	end)
+	return list
+end
+
+function RoyaleUI:CycleSpectate(step)
+	local list = self:SpectateTargets()
+	if #list == 0 then
+		self.SpectateId = nil
+		return
+	end
+	local index = 0
+	for i, participant in ipairs(list) do
+		if participant.Id == self.SpectateId then
+			index = i
+		end
+	end
+	index = ((index - 1 + step) % #list) + 1
+	self.SpectateId = list[index].Id
+	self.ClientState.SpectateId = self.SpectateId
+	self:RefreshSpectate()
+end
+
+function RoyaleUI:RefreshSpectate()
+	local list = self:SpectateTargets()
+	local current = nil
+	for _, participant in ipairs(list) do
+		if participant.Id == self.SpectateId then
+			current = participant
+		end
+	end
+	if not current then -- the watched hero fell (or nobody picked yet): move on to someone alive
+		current = list[1]
+		self.SpectateId = current and current.Id or nil
+	end
+	self.ClientState.SpectateId = self.SpectateId
+	self.SpectateName.Text = current and ("SPECTATING  " .. current.Name .. string.format("   (%d alive)", #list)) or "NOBODY LEFT TO WATCH"
 end
 
 -- Deploy map --------------------------------------------------------------------------------
@@ -484,6 +573,25 @@ function RoyaleUI:Update(state)
 
 	-- royale overlay
 	self.Overlay.Visible = royale ~= nil and inMatch
+	-- eliminated: show your placement and let you watch the survivors
+	local out = royale ~= nil and inMatch and me ~= nil and me.State == "Eliminated"
+	self.SpectatePanel.Visible = out
+	if out then
+		local total = 0
+		for _, participant in ipairs(state.Participants) do
+			if not participant.Spectator and participant.Team then
+				total += 1
+			end
+		end
+		local place = me.Placement
+		self.PlacementText.Text = place and ("YOU PLACED " .. string.upper(ordinal(place))) or "ELIMINATED"
+		self.PlacementText.TextColor3 = place == 2 and Color3.fromRGB(210, 215, 230) or place == 3 and Color3.fromRGB(215, 140, 80) or COLORS.Danger
+		self.PlacementSub.Text = place and string.format("Eliminated - #%d of %d", place, total) or "Out of the match"
+		self:RefreshSpectate()
+	else
+		self.SpectateId = nil
+		self.ClientState.SpectateId = nil
+	end
 	-- the gear panel stays hidden unless a chest is open or it is toggled with I
 	self.GearPanel.Visible = self.OpenChestId ~= nil or self.GearToggled == true
 	if royale and inMatch then

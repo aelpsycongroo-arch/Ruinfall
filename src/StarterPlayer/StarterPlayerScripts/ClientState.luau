@@ -18,6 +18,7 @@ local ClientState = {}
 ClientState.Game = nil
 ClientState.VisibleIds = {}
 ClientState.RevealAll = true
+ClientState.SpectateId = nil -- participant the eliminated player is watching (RoyaleUI)
 ClientState.Changed = Util.Signal.new() -- (state, previous)
 ClientState.StateChanged = Util.Signal.new() -- (matchState, previousMatchState)
 ClientState.VisibilityChanged = Util.Signal.new()

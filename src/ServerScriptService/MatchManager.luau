@@ -165,9 +165,10 @@ local function onHeroDied(entity, killer)
 		table.insert(MatchManager.Context.EliminationOrder, participant.Team)
 		PlayerService.SetPlayerAttributes(participant)
 		local remaining = getRoyale().CountAlive()
+		participant.Placement = remaining + 1 -- 18th ... 2nd (the winner gets 1st in EndMatch)
 		Net.Notify(nil, string.format("%s was slain by %s - %d remain", participant.Name, describeKiller(killer), remaining), "Info")
 		if participant.Player then
-			Net.Notify(participant.Player, "ELIMINATED", "Danger", { Banner = true, Sub = string.format("You placed #%d. Spectating.", remaining + 1) })
+			Net.Notify(participant.Player, "ELIMINATED", "Danger", { Banner = true, Sub = string.format("You placed #%d of %d", remaining + 1, #MatchManager.Context.ActiveTeams) })
 		end
 		MatchManager.Broadcast()
 		return
@@ -324,6 +325,7 @@ function MatchManager.EndMatch(winner)
 		for _, participant in ipairs(PlayerService.GetParticipants()) do
 			if participant.Team == winner then
 				context.WinnerName = participant.Name
+				participant.Placement = 1
 			end
 		end
 	end
@@ -454,8 +456,9 @@ function MatchManager.RunRoyaleMatch()
 						Loot.DropAll(participant, participant.DeathPosition or Vector3.zero)
 						table.insert(context.EliminationOrder, participant.Team)
 						PlayerService.SetPlayerAttributes(participant)
+						participant.Placement = Royale.CountAlive() + 1
 						if participant.Player then
-							Net.Notify(participant.Player, "ELIMINATED", "Danger", { Banner = true, Sub = "Your revive cross was destroyed. Spectating." })
+							Net.Notify(participant.Player, "ELIMINATED", "Danger", { Banner = true, Sub = string.format("Your revive cross was destroyed. You placed #%d.", participant.Placement) })
 						end
 					end
 					MatchManager.Broadcast()

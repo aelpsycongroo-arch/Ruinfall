@@ -49,6 +49,15 @@ local function getFocus(dt)
 		local myTeam = ClientState.GetMyTeam()
 		local me = ClientState.GetMe()
 		local eliminated = me ~= nil and (me.State == "Eliminated" or me.Spectator == true)
+		-- a hero picked in the spectate panel (Royale) comes first
+		if eliminated and ClientState.SpectateId then
+			for _, model in ipairs(CollectionService:GetTagged("RF_Hero")) do
+				local otherRoot = heroRoot(model)
+				if otherRoot and model:GetAttribute("ParticipantId") == ClientState.SpectateId and model:GetAttribute("Dead") ~= true then
+					return Vector3.new(otherRoot.Position.X, 0, otherRoot.Position.Z)
+				end
+			end
+		end
 		for _, model in ipairs(CollectionService:GetTagged("RF_Hero")) do
 			local otherRoot = heroRoot(model)
 			if otherRoot and model:GetAttribute("Dead") ~= true then

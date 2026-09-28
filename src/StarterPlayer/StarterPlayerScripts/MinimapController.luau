@@ -20,7 +20,7 @@ local New, Label = UITheme.New, UITheme.Label
 local SIZE = 237 -- map drawing space (px); scaled to the HUD's MapHolder at runtime
 local FRAME = 300 -- ornate ring image size
 local GOLD = Color3.fromRGB(248, 206, 112)
-local ZOOMS = { 1, 1.6, 2.4 }
+local ZOOMS = { 1 } -- zooming removed: always the whole arena
 local UPDATE_INTERVAL = 0.1
 local player = Players.LocalPlayer
 
@@ -288,19 +288,12 @@ function MinimapController.Init(clientState, fogController, parent)
 	New("UICorner", { CornerRadius = UDim.new(0.5, 0), Parent = shade })
 	UITheme.Stroke(shade, Color3.new(0, 0, 0), 6, 0.45)
 
-	-- zoom tiles (magnifiers are drawn in the frame art)
-	local zoomIn, zoomOut = frame:FindFirstChild("ZoomIn"), frame:FindFirstChild("ZoomOut")
-	if zoomIn then
-		zoomIn.Activated:Connect(function()
-			zoomIndex = math.min(#ZOOMS, zoomIndex + 1)
-			applyZoom()
-		end)
-	end
-	if zoomOut then
-		zoomOut.Activated:Connect(function()
-			zoomIndex = math.max(1, zoomIndex - 1)
-			applyZoom()
-		end)
+	-- no map zoom: the minimap always shows the whole arena (zoom tiles removed)
+	for _, name in ipairs({ "ZoomIn", "ZoomOut" }) do
+		local tile = frame:FindFirstChild(name)
+		if tile then
+			tile:Destroy()
+		end
 	end
 
 	RunService.RenderStepped:Connect(function(dt)
