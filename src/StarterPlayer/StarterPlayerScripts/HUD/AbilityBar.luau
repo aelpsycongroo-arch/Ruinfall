@@ -80,6 +80,7 @@ function AbilityBar.new(group, clientState, combatController)
 	self.Tooltip.Frame.Visible = false
 	self:StyleTooltip()
 	self:FitIcons()
+	self:StyleKeyBadges()
 	self:SetupDragging()
 	return self
 end
@@ -278,6 +279,54 @@ function AbilityBar:FitIcons()
 				local corner = Instance.new("UICorner")
 				corner.CornerRadius = frameCorner.CornerRadius
 				corner.Parent = icon
+			end
+		end
+	end
+end
+
+-- The LM / Q / E / R / MR tabs painted into the bar art end up underneath the slot frame and
+-- icon. Draw a real badge instead: parented to its slot, centred on it horizontally, resting on
+-- the slot's top edge, above everything in the slot (and large enough to hide the painted tab).
+local BADGE_Z = 12
+function AbilityBar:StyleKeyBadges()
+	for _, slot in pairs(self.Slots) do
+		local badge, frame = slot.KeyLabel, slot.Frame
+		if badge and frame then
+			frame.ClipsDescendants = false
+			badge.Parent = frame
+			badge.AnchorPoint = Vector2.new(0.5, 1)
+			badge.Position = UDim2.new(0.5, 0, 0.1, 0)
+			badge.Size = UDim2.fromScale(0.58, 0.38)
+			badge.ZIndex = BADGE_Z
+			badge.Text = slot.Def.Key
+			badge.TextXAlignment = Enum.TextXAlignment.Center
+			badge.TextYAlignment = Enum.TextYAlignment.Center
+			badge.Font = Enum.Font.Merriweather
+			badge.TextScaled = true
+			badge.TextColor3 = Color3.fromRGB(245, 225, 175)
+			badge.TextStrokeTransparency = 0.5
+			badge.BackgroundColor3 = Color3.fromRGB(34, 20, 14)
+			badge.BackgroundTransparency = 0
+			if not badge:FindFirstChild("BadgeCorner") then
+				local corner = Instance.new("UICorner")
+				corner.Name = "BadgeCorner"
+				corner.CornerRadius = UDim.new(0.2, 0)
+				corner.Parent = badge
+				local stroke = Instance.new("UIStroke")
+				stroke.Name = "BadgeStroke"
+				stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+				stroke.Color = Color3.fromRGB(214, 170, 80)
+				stroke.Thickness = 1.5
+				stroke.Parent = badge
+				local padding = Instance.new("UIPadding")
+				padding.PaddingTop = UDim.new(0.14, 0)
+				padding.PaddingBottom = UDim.new(0.14, 0)
+				padding.PaddingLeft = UDim.new(0.1, 0)
+				padding.PaddingRight = UDim.new(0.1, 0)
+				padding.Parent = badge
+				local limit = Instance.new("UITextSizeConstraint")
+				limit.MaxTextSize = 16
+				limit.Parent = badge
 			end
 		end
 	end
