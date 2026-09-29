@@ -507,7 +507,13 @@ function MatchManager.RunMatch()
 
 	setState(STATE.GENERATING)
 	local ok, err = pcall(function()
-		local mapData = MapGenerator.Generate(seed, slotCount, activeTeams)
+		local playerCount = 0
+		for _, participant in ipairs(PlayerService.GetParticipants()) do
+			if not participant.Spectator then
+				playerCount += 1
+			end
+		end
+		local mapData = MapGenerator.Generate(seed, slotCount, activeTeams, playerCount)
 		context.Map = mapData
 		CombatService.BeginMatch(mapData)
 		BaseService.Setup(mapData, activeTeams)

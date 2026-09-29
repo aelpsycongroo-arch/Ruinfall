@@ -1041,7 +1041,7 @@ ItemDefinitions.ClassItemOrder = { "AssassinBoots", "MageBoots", "TankBoots", "F
 -- Purchasable creep War Band (numbers fixed by design for the prototype)
 ----------------------------------------------------------------------------
 ItemDefinitions.CreepWave = {
-	Id = "WarBand", Name = "War Band", Price = 150, Count = 6, KillReward = 20,
+	Id = "WarBand", Name = "War Band", Price = 150, Count = 6, KillReward = 35, -- gold per minion kill (was 20)
 	MaxHealth = 320, Armor = 5, Damage = 24, AttackCooldown = 1.2, AttackRange = 5,
 	AggroRange = 16, MoveSpeed = 13,
 	MaxActivePerPlayer = 1, -- one living war band per player at a time (anti-spam)
@@ -1162,7 +1162,7 @@ end
 local STAT_LABELS = {
 	MoveSpeed = "Move Speed", Armor = "Armor", AttackDamage = "Attack Damage", MaxHealth = "Max Health", AttackSpeed = "Attack Speed",
 	MagicPower = "Magic Power", Mana = "Mana", CooldownReduction = "Cooldown Reduction", CritChance = "Critical Chance",
-	Lifesteal = "Lifesteal", MagicDefense = "Magic Defense", MoveSpeedPercent = "Movement Speed",
+	Lifesteal = "Lifesteal", MagicDefense = "Magic Defense", MoveSpeedPercent = "Movement Speed", ManaRegen = "Mana Regen / sec",
 }
 
 -- Short one-line summary for loot (chests / drops): the two biggest stats + the effect.
@@ -1171,7 +1171,7 @@ local SHORT_STATS = {
 	AttackDamage = { "AD", 1 }, MagicPower = { "MP", 1 }, MaxHealth = { "HP", 0.12 }, Armor = { "Armor", 1 },
 	AttackSpeed = { "Atk Spd", 60, true }, MoveSpeed = { "Speed", 5 }, CritChance = { "Crit", 60, true },
 	Lifesteal = { "Lifesteal", 60, true }, CooldownReduction = { "CDR", 60, true }, Mana = { "Mana", 0.08 },
-	MagicDefense = { "M.Def", 1 }, MoveSpeedPercent = { "Speed", 60, true }, HealthRegen = { "Regen", 1000, true },
+	MagicDefense = { "M.Def", 1 }, MoveSpeedPercent = { "Speed", 60, true }, HealthRegen = { "Regen", 1000, true }, ManaRegen = { "Mana/s", 8 },
 }
 
 function ItemDefinitions.GetShortStats(item)
@@ -1308,7 +1308,7 @@ ItemDefinitions.PASSIVE_VALUE = 100 -- reflect / splash style passives
 --   only, so cheaper than AD's 25g), MagicDefense = armor price (200g / 12), Mana 1g per point
 local EXTRA_STAT_VALUES = {
 	AttackSpeed = 1500, CooldownReduction = 2500, CritChance = 2000, Lifesteal = 2500, MoveSpeedPercent = 2000,
-	MagicPower = 20, MagicDefense = 200 / 12, Mana = 1,
+	MagicPower = 20, MagicDefense = 200 / 12, Mana = 1, ManaRegen = 25,
 }
 
 local statGoldCache = nil
@@ -1370,6 +1370,29 @@ function ItemDefinitions.GetStatText(item)
 		table.insert(parts, string.format("reflects %d%% of damage taken back to attackers", item.PassiveReflect * 100))
 	end
 	return table.concat(parts, ", ")
+end
+
+-- Every pair of boots gives movement speed: boots without it get +1.5 (priced like the stat,
+-- 100 gold before the global price increase below)
+for _, item in pairs(ItemDefinitions.Items) do
+	if item.SlotType == "Boots" then
+		item.Stats = item.Stats or {}
+		if not item.Stats.MoveSpeed then
+			item.Stats.MoveSpeed = 1.5
+			item.Price = (item.Price or 0) + 100
+		end
+	end
+end
+
+-- Mage items with mana regeneration (+mana per second on top of the base regen)
+local MAGE_MANA_REGEN = { EmberStaff = 2, FrostTome = 3, ArcaneOrb = 3, StormcallerRod = 2, MeteorCodex = 2, VoidPrism = 3, RunewardAmulet = 4, ChronoHourglass = 3 }
+for id, regen in pairs(MAGE_MANA_REGEN) do
+	local item = ItemDefinitions.Items[id]
+	if item then
+		item.Stats = item.Stats or {}
+		item.Stats.ManaRegen = regen
+		item.Price = (item.Price or 0) + regen * 25
+	end
 end
 
 -- Global price increase: every shop item (active items, boots, passives) costs 35% more,

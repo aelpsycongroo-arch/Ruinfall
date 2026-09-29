@@ -254,13 +254,66 @@ local function placeCamp(mapData, folders, rng, index, position, angle)
 	table.insert(mapData.Reserved, { Position = position, Radius = GEN.CAMP_RESERVED_RADIUS, Kind = "Camp" })
 end
 
+-- Monster camps scale with the number of players in the match (2-4: 4, 5-10: 6, 11-14: 7,
+-- 15-18: 8) and never sit on or next to a road (lane from a base to the centre).
+local function campCountFor(players)
+	if players <= 4 then
+		return 4
+	elseif players <= 10 then
+		return 6
+	elseif players <= 14 then
+		return 7
+	end
+	return 8
+end
+
+local function laneClearance(mapData, position)
+	local best = math.huge
+	for _, lane in ipairs(mapData.Lanes) do
+		best = math.min(best, Util.PointSegmentDistance2D(position, lane.A, lane.B) - lane.Width / 2)
+	end
+	return best
+end
+
 local function buildCamps(mapData, folders, rng)
-	local campCount = math.max(mapData.SlotCount, GEN.MIN_CAMPS)
-	local campRadius = mapData.Radius * GEN.CAMP_RING_FACTOR
+	local campCount = campCountFor(mapData.PlayerCount or mapData.SlotCount * 2)
+	local need = GEN.CAMP_RESERVED_RADIUS + 8 -- camp edge keeps this far from a road
+	local placed = 0
 	for index = 1, campCount do
-		local angle = (index - 0.5) * 2 * math.pi / campCount
-		local position = Util.RotateY(Vector3.new(0, 0, campRadius), angle)
-		placeCamp(mapData, folders, rng, index, position, angle)
+		local baseAngle = (index - 0.5) * 2 * math.pi / campCount
+		local chosen, chosenAngle = nil, baseAngle
+		-- search around the even spot: small angle shifts first, then other ring distances
+		for _, factor in ipairs({ GEN.CAMP_RING_FACTOR, GEN.CAMP_RING_FACTOR - 0.1, GEN.CAMP_RING_FACTOR + 0.1, GEN.CAMP_RING_FACTOR - 0.18 }) do
+			for step = 0, 12 do
+				for _, sign in ipairs(step == 0 and { 1 } or { 1, -1 }) do
+					local angle = baseAngle + sign * math.rad(step * 3)
+					local position = Util.RotateY(Vector3.new(0, 0, mapData.Radius * factor), angle)
+					if laneClearance(mapData, position) >= need then
+						local clear = true
+						for _, camp in ipairs(mapData.Camps) do
+							if Util.FlatDistance(camp.Position, position) < GEN.CAMP_RESERVED_RADIUS * 2 + 10 then
+								clear = false
+								break
+							end
+						end
+						if clear then
+							chosen, chosenAngle = position, angle
+							break
+						end
+					end
+				end
+				if chosen then
+					break
+				end
+			end
+			if chosen then
+				break
+			end
+		end
+		if chosen then
+			placed += 1
+			placeCamp(mapData, folders, rng, placed, chosen, chosenAngle)
+		end
 	end
 end
 
@@ -711,7 +764,7 @@ function MapGenerator.Clear()
 	MapGenerator.Current = nil
 end
 
-function MapGenerator.Generate(seed, slotCount, activeTeams)
+function MapGenerator.Generate(seed, slotCount, activeTeams, playerCount)
 	MapGenerator.Clear()
 	local rng = Random.new(seed)
 	local activeSet = {}
@@ -747,6 +800,7 @@ function MapGenerator.Generate(seed, slotCount, activeTeams)
 		DecorRandom = Random.new(seed + 99), -- cosmetic only, never affects layout
 		MapName = "CraterArena",
 		Crater = true,
+		PlayerCount = playerCount, -- players + bots (monster camp count)
 	}
 
 	buildGround(mapData, folders)

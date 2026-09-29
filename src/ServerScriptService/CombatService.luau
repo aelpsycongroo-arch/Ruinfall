@@ -195,6 +195,7 @@ function CombatService.ComputeShopBonuses(participant)
 	local bonuses = {
 		MaxHealth = 0, Armor = 0, MoveSpeed = 0, AttackDamage = 0, HealthRegen = 0, AttackSpeed = 0,
 		MagicPower = 0, Mana = 0, CooldownReduction = 0, CritChance = 0, Lifesteal = 0, MagicDefense = 0, MoveSpeedPercent = 0,
+		ManaRegen = 0,
 	}
 	if not participant or not participant.Purchases then
 		return bonuses
@@ -239,6 +240,7 @@ local function applyExtraStats(entity, bonuses, fresh)
 	entity.MagicDefense = bonuses.MagicDefense or 0
 	entity.CooldownReduction = math.clamp(bonuses.CooldownReduction or 0, 0, MAX_CDR)
 	entity.BonusMoveSpeedPercent = bonuses.MoveSpeedPercent or 0
+	entity.BonusManaRegen = bonuses.ManaRegen or 0 -- mana per second (mage items)
 	local oldMax = entity.MaxMana or 0
 	entity.MaxMana = MANA.Base + (bonuses.Mana or 0)
 	if fresh or entity.Mana == nil then
@@ -1213,7 +1215,7 @@ local function tickStatus(dt)
 					entity.Model:SetAttribute("EmpoweredAttack", false)
 				end
 				if entity.MaxMana and entity.Mana < entity.MaxMana then
-					entity.Mana = math.min(entity.MaxMana, entity.Mana + MANA.RegenPerSecond * dt)
+					entity.Mana = math.min(entity.MaxMana, entity.Mana + (MANA.RegenPerSecond + (entity.BonusManaRegen or 0)) * dt)
 					CombatService.SyncMana(entity)
 				end
 				if now - entity.LastDamagedAt >= COMBAT.OUT_OF_COMBAT_TIME and entity.Health < entity.MaxHealth then

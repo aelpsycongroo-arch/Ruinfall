@@ -412,7 +412,9 @@ local function updateObjective(record)
 			record.Tag.Text = ""
 		else
 			record.Bar.Set(0)
-			record.Tag.Text = flagState == "LastStand" and "FLAG DOWN - RESTORE WITH A CORE" or "FLAG DESTROYED"
+			-- the restore hint is only for the team that lost the base
+			local own = team == ClientState.GetMyTeam()
+			record.Tag.Text = flagState == "LastStand" and (own and "FLAG DOWN - RESTORE WITH A CORE" or "") or "FLAG DESTROYED"
 			record.Tag.TextColor3 = flagState == "LastStand" and COLORS.Fragment or COLORS.Subtext
 		end
 	end
