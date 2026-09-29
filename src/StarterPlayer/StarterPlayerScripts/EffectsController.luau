@@ -35,6 +35,7 @@ local numberAnchor = nil
 local numberPool = {}
 local random = Random.new()
 local handlers = {}
+local hitFlash -- defined with the Damage handler
 
 -- Pooling ------------------------------------------------------------------------
 local function acquire(key, shape, material)
@@ -180,13 +181,104 @@ local function floatingNumber(position, text, color, big)
 	end)
 end
 
--- Handlers (one per server effect kind) -----------------------------------------------
+-- small glowing chips that fly out of an impact, arc down and fade
+local function sparks(position, color, count, speed)
+	for _ = 1, count do
+		local part = acquire("Spark")
+		part.Color = color
+		part.Size = Vector3.new(0.22, 0.22, 0.22)
+		local velocity = Vector3.new(random:NextNumber(-1, 1), random:NextNumber(0.4, 1.2), random:NextNumber(-1, 1)).Unit * (speed or 18) * random:NextNumber(0.6, 1)
+		local spin = random:NextNumber(-12, 12)
+		local life = random:NextNumber(0.22, 0.38)
+		animate(life, function(alpha)
+			local t = alpha * life
+			local offset = velocity * t + Vector3.new(0, -30 * t * t, 0)
+			part.CFrame = CFrame.new(position + offset) * CFrame.Angles(spin * t, spin * t * 0.7, 0)
+			part.Transparency = 0.1 + 0.9 * alpha
+		end, function()
+			release("Spark", part)
+		end)
+	end
+end
+
+-- Projectiles --------------------------------------------------------------------------------
+-- Every projectile gets a glowing trail; fireballs / arcane bolts flicker with particles and
+-- pulse, knives spin, arrows and power shots leave long streaks. Launch flash + impact burst.
+local PROJECTILE_FX = {
+	Default = { Trail = 0.12, Width = 0.5 },
+	Arrow = { Trail = 0.18, Width = 0.25, Streak = true },
+	PowerShot = { Trail = 0.28, Width = 0.8, Streak = true, Sparks = 8 },
+	Knife = { Trail = 0.12, Width = 0.3, Spin = 26 },
+	Fireball = { Trail = 0.3, Width = 1.4, Pulse = true, Particles = "Fire", Sparks = 10 },
+	Arcane = { Trail = 0.25, Width = 1.1, Pulse = true, Particles = "Arcane", Sparks = 7 },
+}
+
+local function dressProjectile(part, style, fx)
+	if part:GetAttribute("Dressed") then
+		return
+	end
+	part:SetAttribute("Dressed", true)
+	local length = math.max(style.Size.X, style.Size.Y, style.Size.Z)
+	local back = Instance.new("Attachment")
+	back.Name = "TrailA"
+	back.Position = Vector3.new(0, fx.Width / 2, length / 2)
+	back.Parent = part
+	local back2 = Instance.new("Attachment")
+	back2.Name = "TrailB"
+	back2.Position = Vector3.new(0, -fx.Width / 2, length / 2)
+	back2.Parent = part
+	local trail = Instance.new("Trail")
+	trail.Attachment0, trail.Attachment1 = back, back2
+	trail.Lifetime = fx.Trail
+	trail.MinLength = 0.05
+	trail.FaceCamera = true
+	trail.LightEmission = 1
+	trail.LightInfluence = 0
+	trail.WidthScale = NumberSequence.new(1, 0.1)
+	trail.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, fx.Streak and 0.1 or 0.3), NumberSequenceKeypoint.new(1, 1) })
+	trail.Color = ColorSequence.new(Color3.new(1, 1, 1), style.Color)
+	trail.Parent = part
+	if fx.Particles then
+		local emitter = Instance.new("ParticleEmitter")
+		emitter.Name = "Flicker"
+		emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		emitter.LightEmission = 1
+		emitter.Color = fx.Particles == "Fire" and ColorSequence.new(Color3.fromRGB(255, 220, 120), Color3.fromRGB(255, 70, 20)) or ColorSequence.new(Color3.fromRGB(230, 200, 255), style.Color)
+		emitter.Size = NumberSequence.new(0.7, 0)
+		emitter.Transparency = NumberSequence.new(0.1, 1)
+		emitter.Lifetime = NumberRange.new(0.2, 0.35)
+		emitter.Rate = 60
+		emitter.Speed = NumberRange.new(1, 3)
+		emitter.SpreadAngle = Vector2.new(180, 180)
+		emitter.Parent = part
+	end
+end
+
+local function setProjectileFx(part, on)
+	local trail = part:FindFirstChildOfClass("Trail")
+	if trail then
+		trail.Enabled = on
+		if on then
+			trail:Clear()
+		end
+	end
+	local emitter = part:FindFirstChild("Flicker")
+	if emitter then
+		emitter.Enabled = on
+	end
+end
+
 handlers.Projectile = function(data)
 	local style = CombatDefinitions.ProjectileStyles[data.Style] or CombatDefinitions.ProjectileStyles.Default
+	local fx = PROJECTILE_FX[data.Style or "Default"] or PROJECTILE_FX.Default
 	local key = "Projectile_" .. (data.Style or "Default")
 	local part = acquire(key, style.Shape == "Ball" and Enum.PartType.Ball or Enum.PartType.Block)
 	part.Size = style.Size
 	part.Color = style.Color
+	dressProjectile(part, style, fx)
+	-- start at the launch point before the trail switches on (no streak from the pool position)
+	part.CFrame = CFrame.lookAt(data.Origin, data.Origin + data.Direction)
+	setProjectileFx(part, true)
 	if style.Light then
 		local light = part:FindFirstChildOfClass("PointLight")
 		if not light then
@@ -198,18 +290,25 @@ handlers.Projectile = function(data)
 		light.Color = style.Color
 		light.Enabled = true
 	end
-	projectiles[data.Id] = { Part = part, Key = key, Origin = data.Origin, Direction = data.Direction, Speed = data.Speed, Range = data.Range, Elapsed = 0 }
+	if visible(data.Origin) then
+		sphereBurst(data.Origin, 0.4, fx.Pulse and 2.6 or 1.6, style.Color, 0.12, 0.3) -- launch flash
+	end
+	projectiles[data.Id] = { Part = part, Key = key, Origin = data.Origin, Direction = data.Direction, Speed = data.Speed, Range = data.Range, Elapsed = 0, Fx = fx, BaseSize = style.Size }
 end
 
 handlers.ProjectileEnd = function(data)
 	local projectile = projectiles[data.Id]
 	if projectile then
 		projectiles[data.Id] = nil
+		setProjectileFx(projectile.Part, false)
 		release(projectile.Key, projectile.Part)
 	end
 	if visible(data.Position) then
 		local style = CombatDefinitions.ProjectileStyles[data.Style] or CombatDefinitions.ProjectileStyles.Default
-		sphereBurst(data.Position, 0.8, 3, style.Color, 0.18)
+		local fx = PROJECTILE_FX[data.Style or "Default"] or PROJECTILE_FX.Default
+		sphereBurst(data.Position, 0.8, fx.Pulse and 4.5 or 3, style.Color, 0.2)
+		ring(data.Position, 0.5, fx.Pulse and 4 or 2.5, style.Color, 0.25, 0.35)
+		sparks(data.Position, style.Color, fx.Sparks or 4, fx.Pulse and 22 or 16)
 	end
 end
 
@@ -229,35 +328,74 @@ local function attackerRoot(entityId)
 	return nil
 end
 
+-- Melee swoosh: a curved crescent that sweeps across the arc (bright leading edge, fading
+-- tail), glued to the attacker. Empowered swings get a wider, double crescent and sparks.
+local SWOOSH_SEGMENTS = 9
 handlers.Melee = function(data)
 	if not visible(data.Origin) then
 		return
 	end
 	local direction = data.Direction
 	local yaw = math.atan2(-direction.X, -direction.Z)
-	local halfArc = math.rad(data.Arc or 90) / 2
+	local halfArc = math.rad(math.clamp(data.Arc or 90, 40, 360)) / 2
 	local range = data.Range or 6
-	local origin = Vector3.new(data.Origin.X, data.Origin.Y - 0.5, data.Origin.Z)
+	local origin = Vector3.new(data.Origin.X, data.Origin.Y - 0.3, data.Origin.Z)
 	local followRoot = attackerRoot(data.EntityId)
 	local heightOffset = followRoot and (origin.Y - followRoot.Position.Y) or 0
-	local blades = data.Empowered and 2 or 1
-	for bladeIndex = 1, blades do
-		local part = acquire("Slash")
-		part.Color = data.Empowered and Color3.fromRGB(255, 220, 120) or data.Color
-		part.Size = Vector3.new(bladeIndex == 1 and 0.5 or 0.9, 0.15, range)
-		local duration = 0.13 + (bladeIndex - 1) * 0.05
+	local color = data.Empowered and Color3.fromRGB(255, 225, 140) or data.Color
+	local layers = data.Empowered and 2 or 1
+	local duration = 0.24
+	local sweep = 0.55 -- share of the duration the leading edge needs to cross the arc
+	-- alternate the sweep direction each swing of the same attacker so combos read left/right
+	local flip = 1
+	if data.EntityId then
+		EffectsController.SwingSide = EffectsController.SwingSide or {}
+		flip = (EffectsController.SwingSide[data.EntityId] or 1) * -1
+		EffectsController.SwingSide[data.EntityId] = flip
+	end
+	for layer = 1, layers do
+		local radius = range * (layer == 1 and 0.72 or 0.9)
+		local segments = {}
+		for index = 1, SWOOSH_SEGMENTS do
+			local part = acquire("Swoosh")
+			part.Color = index == SWOOSH_SEGMENTS and Color3.new(1, 1, 1):Lerp(color, 0.4) or color
+			part.Transparency = 1
+			segments[index] = part
+		end
+		local segmentAngle = halfArc * 2 / SWOOSH_SEGMENTS
+		local chord = 2 * radius * math.sin(segmentAngle / 2) + 0.15
 		animate(duration, function(alpha)
-			local angle = -halfArc + halfArc * 2 * alpha
 			local center = origin
 			if followRoot and followRoot.Parent then
 				local p = followRoot.Position
-				center = Vector3.new(p.X, p.Y + heightOffset, p.Z) -- stay glued to the attacker
+				center = Vector3.new(p.X, p.Y + heightOffset, p.Z)
 			end
-			part.CFrame = CFrame.new(center) * CFrame.Angles(0, yaw + angle, 0) * CFrame.new(0, 0, -range / 2)
-			part.Transparency = 0.1 + 0.8 * alpha
+			local lead = math.clamp(alpha / sweep, 0, 1)
+			lead = 1 - (1 - lead) ^ 2.5
+			for index, part in ipairs(segments) do
+				local at = (index - 0.5) / SWOOSH_SEGMENTS
+				local angle = flip * (-halfArc + halfArc * 2 * at)
+				if at > lead then
+					part.Transparency = 1
+				else
+					-- thick in the middle of the crescent, thin at the tips; older segments fade first
+					local shape = math.sin(math.pi * at)
+					local age = (lead - at) / math.max(0.05, lead)
+					local fade = math.clamp(age * 0.7 + math.max(0, alpha - sweep) / (1 - sweep), 0, 1)
+					part.Size = Vector3.new(chord, 0.1, 0.35 + 1.1 * shape * (layer == 1 and 1 or 0.6))
+					part.CFrame = CFrame.new(center) * CFrame.Angles(0, yaw + angle, 0) * CFrame.new(0, (layer - 1) * 0.25, -radius)
+					part.Transparency = 0.05 + 0.95 * fade
+				end
+			end
 		end, function()
-			release("Slash", part)
+			for _, part in ipairs(segments) do
+				release("Swoosh", part)
+			end
 		end)
+	end
+	if data.Empowered then
+		local tip = origin + Vector3.new(-math.sin(yaw), 0, -math.cos(yaw)) * range * 0.7
+		sparks(tip, color, 6, 20)
 	end
 end
 
@@ -367,6 +505,60 @@ handlers.Lightning = function(data)
 	sphereBurst(to, 1, 3, data.Color or Color3.fromRGB(255, 240, 120), 0.2)
 end
 
+-- Hit flash: the struck unit glows white for a split second (stronger on crits / heavy hits)
+local HIT_TAGS = { "RF_Hero", "RF_Creep", "RF_Monster" }
+local modelCache = {}
+local flashes = {}
+local function modelForEntity(entityId)
+	local cached = modelCache[entityId]
+	if cached and cached.Parent and cached:GetAttribute("EntityId") == entityId then
+		return cached
+	end
+	modelCache[entityId] = nil
+	for _, tag in ipairs(HIT_TAGS) do
+		for _, model in ipairs(game:GetService("CollectionService"):GetTagged(tag)) do
+			if model:GetAttribute("EntityId") == entityId then
+				modelCache[entityId] = model
+				return model
+			end
+		end
+	end
+	return nil
+end
+hitFlash = function(entityId, strong)
+	if not entityId then
+		return
+	end
+	local model = modelForEntity(entityId)
+	if not model then
+		return
+	end
+	local highlight = flashes[model]
+	if not highlight or not highlight.Parent then
+		highlight = Instance.new("Highlight")
+		highlight.Name = "RF_HitFlash"
+		highlight.DepthMode = Enum.HighlightDepthMode.Occluded
+		highlight.FillColor = Color3.new(1, 1, 1)
+		highlight.OutlineTransparency = 1
+		highlight.FillTransparency = 1
+		highlight.Parent = model
+		flashes[model] = highlight
+	end
+	-- only enabled while flashing (Roblox renders a limited number of Highlights at once)
+	local peak = strong and 0.25 or 0.5
+	highlight.Enabled = true
+	local token = (highlight:GetAttribute("Token") or 0) + 1
+	highlight:SetAttribute("Token", token)
+	animate(strong and 0.18 or 0.12, function(alpha)
+		highlight.FillTransparency = peak + (1 - peak) * alpha
+	end, function()
+		if highlight:GetAttribute("Token") == token then
+			highlight.FillTransparency = 1
+			highlight.Enabled = false
+		end
+	end)
+end
+
 handlers.Damage = function(data)
 	if data.Kind == "Miss" then
 		if visible(data.Position) then
@@ -378,6 +570,7 @@ handlers.Damage = function(data)
 		return
 	end
 	floatingNumber(data.Position, tostring(data.Amount), NUMBER_COLORS[data.Kind] or NUMBER_COLORS.Damage, data.Kind == "Crit")
+	hitFlash(data.TargetId, data.Kind == "Crit" or data.Heavy)
 end
 
 -- Smoke Bomb cloud: a ring of drifting grey puffs that fades out when the smoke ends
@@ -630,11 +823,25 @@ local function onRender(dt)
 		local traveled = projectile.Speed * projectile.Elapsed
 		if traveled > projectile.Range + 6 then
 			projectiles[id] = nil
+			setProjectileFx(projectile.Part, false)
 			release(projectile.Key, projectile.Part)
 		else
 			local position = projectile.Origin + projectile.Direction * math.min(traveled, projectile.Range)
-			projectile.Part.CFrame = CFrame.lookAt(position, position + projectile.Direction)
-			projectile.Part.Transparency = FogController.IsVisible(position) and 0 or 1
+			local cframe = CFrame.lookAt(position, position + projectile.Direction)
+			local fx = projectile.Fx
+			if fx and fx.Spin then
+				cframe *= CFrame.Angles(0, projectile.Elapsed * fx.Spin, 0) -- thrown blades whirl flat
+			end
+			projectile.Part.CFrame = cframe
+			if fx and fx.Pulse then
+				projectile.Part.Size = projectile.BaseSize * (1 + 0.15 * math.sin(projectile.Elapsed * 30))
+			end
+			local shown = FogController.IsVisible(position)
+			projectile.Part.Transparency = shown and 0 or 1
+			if projectile.Shown ~= shown then
+				projectile.Shown = shown
+				setProjectileFx(projectile.Part, shown)
+			end
 		end
 	end
 	for index = #animations, 1, -1 do
@@ -698,6 +905,7 @@ function EffectsController.Init(clientState, fogController)
 	clientState.StateChanged:Connect(function()
 		for id, projectile in pairs(projectiles) do
 			projectiles[id] = nil
+			setProjectileFx(projectile.Part, false)
 			release(projectile.Key, projectile.Part)
 		end
 	end)

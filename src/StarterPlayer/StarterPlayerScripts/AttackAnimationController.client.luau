@@ -31,21 +31,49 @@ end
 -- Keyframes: { T = 0..1, Pose = { Joint = CFrame } }; joints missing from a pose are neutral.
 local ANIMATIONS = {
 	Fighter = {
-		Attack = { Duration = 0.46, Keys = {
-			{ T = 0.36, Pose = { RightShoulder = R(2.6, 0, 0.45), RightElbow = R(0.7), RightWrist = R(0.3), Waist = R(0.08, -0.45), LeftShoulder = R(0.5, 0, -0.25) } },
-			{ T = 0.62, Pose = { RightShoulder = R(0.55, 0, -0.55), RightElbow = R(0.15), RightWrist = R(-0.7), Waist = R(-0.18, 0.5), LeftShoulder = R(-0.3, 0, -0.2) } },
-			{ T = 0.8, Pose = { RightShoulder = R(0.45, 0, -0.45), RightElbow = R(0.2), RightWrist = R(-0.5), Waist = R(-0.1, 0.35) } },
-		} },
+		-- 3-hit sword combo (resets after a pause): wide forehand slash -> backhand return ->
+		-- stepping overhead chop. Each swing: quick wind-up (Out), snapping strike (Snap), slow
+		-- settle, with the hips and legs stepping into the blow.
+		Combo = {
+			{ Duration = 0.44, Keys = {
+				{ T = 0.3, Ease = "Out", Pose = { RightShoulder = R(1.9, 0.5, 1.2), RightElbow = R(0.9), RightWrist = R(0.4), Waist = R(0.1, -0.6), Neck = R(0, 0.35), LeftShoulder = R(0.6, 0, -0.4), LeftHip = R(0.25), RightHip = R(-0.15) } },
+				{ T = 0.52, Ease = "Snap", Pose = { RightShoulder = R(1.3, -0.4, -1.1), RightElbow = R(0.1), RightWrist = R(-0.6), Waist = R(-0.12, 0.65), Neck = R(0, -0.35), LeftShoulder = R(-0.2, 0, -0.5), RightHip = R(0.4), RightKnee = R(-0.35), LeftHip = R(-0.2) } },
+				{ T = 0.72, Ease = "Out", Pose = { RightShoulder = R(1.0, -0.3, -0.9), RightElbow = R(0.2), RightWrist = R(-0.5), Waist = R(-0.08, 0.5), Neck = R(0, -0.25), RightHip = R(0.3), RightKnee = R(-0.25) } },
+			} },
+			{ Duration = 0.42, Keys = {
+				{ T = 0.28, Ease = "Out", Pose = { RightShoulder = R(1.4, -0.5, -1.3), RightElbow = R(1.1), RightWrist = R(-0.5), Waist = R(0.05, 0.6), Neck = R(0, -0.3), LeftShoulder = R(0.4, 0, -0.3), RightHip = R(0.2) } },
+				{ T = 0.5, Ease = "Snap", Pose = { RightShoulder = R(1.5, 0.5, 1.25), RightElbow = R(0.15), RightWrist = R(0.5), Waist = R(-0.1, -0.7), Neck = R(0, 0.4), LeftShoulder = R(0.2, 0, -0.9), LeftHip = R(0.4), LeftKnee = R(-0.35), RightHip = R(-0.2) } },
+				{ T = 0.72, Ease = "Out", Pose = { RightShoulder = R(1.2, 0.4, 1.0), RightElbow = R(0.25), RightWrist = R(0.3), Waist = R(-0.05, -0.5), Neck = R(0, 0.3), LeftHip = R(0.3), LeftKnee = R(-0.25) } },
+			} },
+			{ Duration = 0.55, Keys = {
+				{ T = 0.36, Ease = "Out", Pose = { RightShoulder = R(3.0, 0, 0.25), LeftShoulder = R(2.7, 0, -0.25), RightElbow = R(0.8), LeftElbow = R(0.8), RightWrist = R(0.5), Waist = R(0.3), Neck = R(-0.2), RightHip = R(-0.1), LeftHip = R(0.15) } },
+				{ T = 0.52, Ease = "Snap", Pose = { RightShoulder = R(0.6, 0, 0.1), LeftShoulder = R(0.5, 0, -0.1), RightElbow = R(0.05), LeftElbow = R(0.1), RightWrist = R(-0.7), Waist = R(-0.45), Neck = R(0.25), RightHip = R(0.7), RightKnee = R(-0.7), LeftHip = R(-0.35) } },
+				{ T = 0.78, Ease = "Out", Pose = { RightShoulder = R(0.5), LeftShoulder = R(0.45), RightWrist = R(-0.5), Waist = R(-0.3), Neck = R(0.15), RightHip = R(0.5), RightKnee = R(-0.5), LeftHip = R(-0.2) } },
+			} },
+		},
+		Trail = true,
 		Ability = { Duration = 0.7, Keys = {
 			{ T = 0.3, Pose = { RightShoulder = R(2.5, 0, 0.7), LeftShoulder = R(2.5, 0, -0.7), RightElbow = R(0.4), LeftElbow = R(0.4), Waist = R(0.28), Neck = R(0.35) } },
 			{ T = 0.7, Pose = { RightShoulder = R(2.4, 0, 0.8), LeftShoulder = R(2.4, 0, -0.8), RightElbow = R(0.5), LeftElbow = R(0.5), Waist = R(0.22), Neck = R(0.3) } },
 		} },
 	},
 	Assassin = {
-		Attack = { Duration = 0.32, Alternate = true, Keys = {
-			{ T = 0.35, Pose = { RightShoulder = R(0.5, 0, 0.25), RightElbow = R(1.7), Waist = R(0, -0.3), LeftShoulder = R(0.3, 0, -0.2), LeftElbow = R(0.6) } },
-			{ T = 0.6, Pose = { RightShoulder = R(1.5, 0, -0.1), RightElbow = R(0.05), RightWrist = R(-0.2), Waist = R(-0.15, 0.35), LeftShoulder = R(0.2, 0, -0.2), LeftElbow = R(0.9) } },
-		} },
+		-- fast dagger string: right stab -> left stab -> crossing double slash
+		Combo = {
+			{ Duration = 0.3, Keys = {
+				{ T = 0.3, Ease = "Out", Pose = { RightShoulder = R(0.5, 0, 0.35), RightElbow = R(1.9), Waist = R(0.05, -0.4), LeftShoulder = R(0.4, 0, -0.3), LeftElbow = R(0.9), RightHip = R(-0.2) } },
+				{ T = 0.5, Ease = "Snap", Pose = { RightShoulder = R(1.6, 0, -0.15), RightElbow = R(0), RightWrist = R(-0.2), Waist = R(-0.2, 0.45), LeftShoulder = R(0.2, 0, -0.3), LeftElbow = R(1.0), RightHip = R(0.45), RightKnee = R(-0.4) } },
+			} },
+			{ Duration = 0.3, Keys = {
+				{ T = 0.3, Ease = "Out", Pose = { LeftShoulder = R(0.5, 0, -0.35), LeftElbow = R(1.9), Waist = R(0.05, 0.4), RightShoulder = R(0.4, 0, 0.3), RightElbow = R(0.9), LeftHip = R(-0.2) } },
+				{ T = 0.5, Ease = "Snap", Pose = { LeftShoulder = R(1.6, 0, 0.15), LeftElbow = R(0), LeftWrist = R(-0.2), Waist = R(-0.2, -0.45), RightShoulder = R(0.2, 0, 0.3), RightElbow = R(1.0), LeftHip = R(0.45), LeftKnee = R(-0.4) } },
+			} },
+			{ Duration = 0.38, Keys = {
+				{ T = 0.32, Ease = "Out", Pose = { RightShoulder = R(2.2, 0, 0.9), LeftShoulder = R(2.2, 0, -0.9), RightElbow = R(0.6), LeftElbow = R(0.6), Waist = R(0.2), Neck = R(-0.15) } },
+				{ T = 0.52, Ease = "Snap", Pose = { RightShoulder = R(0.9, 0, -0.9), LeftShoulder = R(0.9, 0, 0.9), RightElbow = R(0.1), LeftElbow = R(0.1), Waist = R(-0.35), Neck = R(0.2), RightHip = R(0.5), LeftHip = R(0.5), RightKnee = R(-0.6), LeftKnee = R(-0.6) } },
+			} },
+		},
+		Trail = true,
 		Ability = { Duration = 0.4, Keys = {
 			{ T = 0.35, Pose = { RightShoulder = R(-0.9, 0, 0.35), LeftShoulder = R(-0.9, 0, -0.35), Waist = R(-0.4), Neck = R(0.3) } },
 			{ T = 0.75, Pose = { RightShoulder = R(-0.7, 0, 0.3), LeftShoulder = R(-0.7, 0, -0.3), Waist = R(-0.3), Neck = R(0.25) } },
@@ -53,8 +81,8 @@ local ANIMATIONS = {
 	},
 	Mage = {
 		Attack = { Duration = 0.5, Keys = {
-			{ T = 0.4, Pose = { RightShoulder = R(1.25, 0, 0.15), RightElbow = R(0.45), RightWrist = R(-1.6), Waist = R(0.12, -0.15), LeftShoulder = R(0.6, 0, -0.25), LeftElbow = R(0.6) } },
-			{ T = 0.62, Pose = { RightShoulder = R(1.5), RightElbow = R(0), RightWrist = R(-2.3), Waist = R(-0.15, 0.1), LeftShoulder = R(1.2, 0, -0.1), LeftElbow = R(0.2) } },
+			{ T = 0.4, Ease = "Out", Pose = { RightShoulder = R(1.25, 0, 0.15), RightElbow = R(0.45), RightWrist = R(-1.6), Waist = R(0.12, -0.15), LeftShoulder = R(0.6, 0, -0.25), LeftElbow = R(0.6), RightHip = R(-0.15) } },
+			{ T = 0.58, Ease = "Snap", Pose = { RightShoulder = R(1.6), RightElbow = R(0), RightWrist = R(-2.3), Waist = R(-0.2, 0.15), LeftShoulder = R(1.2, 0, -0.1), LeftElbow = R(0.2), RightHip = R(0.35), RightKnee = R(-0.3) } },
 			{ T = 0.8, Pose = { RightShoulder = R(1.3), RightElbow = R(0.1), RightWrist = R(-2.0), Waist = R(-0.1), LeftShoulder = R(0.9, 0, -0.1) } },
 		} },
 		Ability = { Duration = 0.65, Keys = {
@@ -81,11 +109,24 @@ local ANIMATIONS = {
 		} },
 	},
 	Tank = {
-		Attack = { Duration = 0.55, Keys = {
-			{ T = 0.42, Pose = { RightShoulder = R(2.8, 0, 0.25), RightElbow = R(0.9), Waist = R(0.18, -0.2), LeftShoulder = R(0.9, 0, -0.1), LeftElbow = R(0.8) } },
-			{ T = 0.64, Pose = { RightShoulder = R(0.7, 0, -0.15), RightElbow = R(0.1), RightWrist = R(-0.4), Waist = R(-0.32, 0.2), LeftShoulder = R(0.8, 0, -0.1), LeftElbow = R(0.8) } },
-			{ T = 0.8, Pose = { RightShoulder = R(0.6, 0, -0.1), RightElbow = R(0.15), Waist = R(-0.2, 0.1), LeftShoulder = R(0.7), LeftElbow = R(0.7) } },
-		} },
+		-- heavy blows behind the shield: overhead smash -> shield bash -> rising uppercut swing
+		Combo = {
+			{ Duration = 0.56, Keys = {
+				{ T = 0.4, Ease = "Out", Pose = { RightShoulder = R(2.9, 0, 0.3), RightElbow = R(0.9), Waist = R(0.2, -0.25), Neck = R(-0.1), LeftShoulder = R(1.1, 0, 0.2), LeftElbow = R(1.0), LeftHip = R(0.15) } },
+				{ T = 0.56, Ease = "Snap", Pose = { RightShoulder = R(0.6, 0, -0.15), RightElbow = R(0.05), RightWrist = R(-0.5), Waist = R(-0.4, 0.25), Neck = R(0.2), LeftShoulder = R(1.0, 0, 0.2), LeftElbow = R(1.0), RightHip = R(0.6), RightKnee = R(-0.6), LeftHip = R(-0.25) } },
+				{ T = 0.8, Ease = "Out", Pose = { RightShoulder = R(0.5, 0, -0.1), Waist = R(-0.25, 0.15), LeftShoulder = R(0.9, 0, 0.2), LeftElbow = R(0.9), RightHip = R(0.4), RightKnee = R(-0.4) } },
+			} },
+			{ Duration = 0.5, Keys = {
+				{ T = 0.35, Ease = "Out", Pose = { LeftShoulder = R(0.8, 0, 0.5), LeftElbow = R(1.6), Waist = R(0.1, 0.45), RightShoulder = R(0.4, 0, 0.3), RightElbow = R(0.8) } },
+				{ T = 0.55, Ease = "Snap", Pose = { LeftShoulder = R(1.6, 0, 0.05), LeftElbow = R(0.2), Waist = R(-0.25, -0.35), RightShoulder = R(0.2, 0, 0.3), LeftHip = R(0.55), LeftKnee = R(-0.5), RightHip = R(-0.2) } },
+			} },
+			{ Duration = 0.55, Keys = {
+				{ T = 0.35, Ease = "Out", Pose = { RightShoulder = R(-0.4, 0, 0.5), RightElbow = R(0.6), Waist = R(0.25, -0.5), LeftShoulder = R(1.1, 0, 0.2), LeftElbow = R(1.0), RightHip = R(-0.2), RightKnee = R(-0.3) } },
+				{ T = 0.55, Ease = "Snap", Pose = { RightShoulder = R(2.6, 0, -0.3), RightElbow = R(0.3), RightWrist = R(0.4), Waist = R(-0.2, 0.45), Neck = R(-0.2), LeftShoulder = R(1.0, 0, 0.2), LeftElbow = R(1.0), RightHip = R(0.5), RightKnee = R(-0.4) } },
+				{ T = 0.8, Ease = "Out", Pose = { RightShoulder = R(2.0, 0, -0.2), RightElbow = R(0.4), Waist = R(-0.1, 0.3), LeftShoulder = R(0.9, 0, 0.2), LeftElbow = R(0.9) } },
+			} },
+		},
+		Trail = true,
 		Ability = { Duration = 0.7, Keys = {
 			{ T = 0.35, Pose = { LeftShoulder = R(2.0, 0, -0.2), LeftElbow = R(0.5), RightShoulder = R(2.6, 0, 0.3), RightElbow = R(0.6), Waist = R(0.25), Neck = R(0.2) } },
 			{ T = 0.58, Pose = { LeftShoulder = R(1.1), LeftElbow = R(0.3), RightShoulder = R(0.9), RightElbow = R(0.2), Waist = R(-0.45), Neck = R(-0.1) } },
@@ -174,6 +215,32 @@ ITEM_ANIMATIONS.BattleTrance = ITEM_ANIMATIONS.RallyingHorn
 ITEM_ANIMATIONS.Warpath = ITEM_ANIMATIONS.Whirlwind
 ITEM_ANIMATIONS.SkullSplitter = ITEM_ANIMATIONS.CrushingLeap
 ITEM_ANIMATIONS.LeapingBound = ITEM_ANIMATIONS.CrushingLeap
+-- class active items, set 2
+ITEM_ANIMATIONS.Assassinate = ITEM_ANIMATIONS.PointStrike
+ITEM_ANIMATIONS.VenomToxin = ITEM_ANIMATIONS.Fireball
+ITEM_ANIMATIONS.DeathMark = ITEM_ANIMATIONS.PointStrike
+ITEM_ANIMATIONS.RicochetBlade = ITEM_ANIMATIONS.Fireball
+ITEM_ANIMATIONS.Evasion = ITEM_ANIMATIONS.Blink
+ITEM_ANIMATIONS.ChainLightning = ITEM_ANIMATIONS.Fireball
+ITEM_ANIMATIONS.Meteor = ITEM_ANIMATIONS.FrostNova
+ITEM_ANIMATIONS.VoidRift = ITEM_ANIMATIONS.WindPull
+ITEM_ANIMATIONS.ManaAegis = ITEM_ANIMATIONS.SpikedScale
+ITEM_ANIMATIONS.TimeWarp = ITEM_ANIMATIONS.WindPull
+ITEM_ANIMATIONS.Snipe = ITEM_ANIMATIONS.WindPull
+ITEM_ANIMATIONS.BearTrap = ITEM_ANIMATIONS.Fireball
+ITEM_ANIMATIONS.HuntersMark = ITEM_ANIMATIONS.RallyingHorn
+ITEM_ANIMATIONS.Buckshot = ITEM_ANIMATIONS.Bulwark
+ITEM_ANIMATIONS.ArrowStorm = ITEM_ANIMATIONS.RallyingHorn
+ITEM_ANIMATIONS.ChainHook = ITEM_ANIMATIONS.Fireball
+ITEM_ANIMATIONS.Challenge = ITEM_ANIMATIONS.RallyingHorn
+ITEM_ANIMATIONS.StoneForm = ITEM_ANIMATIONS.SpikedScale
+ITEM_ANIMATIONS.Fissure = ITEM_ANIMATIONS.CrushingLeap
+ITEM_ANIMATIONS.Sanctuary = ITEM_ANIMATIONS.RallyingHorn
+ITEM_ANIMATIONS.CrimsonCleave = ITEM_ANIMATIONS.Whirlwind
+ITEM_ANIMATIONS.RendingCharge = ITEM_ANIMATIONS.PointStrike
+ITEM_ANIMATIONS.BattleStandard = ITEM_ANIMATIONS.CrushingLeap
+ITEM_ANIMATIONS.Guillotine = ITEM_ANIMATIONS.CrushingLeap
+ITEM_ANIMATIONS.LastStand = ITEM_ANIMATIONS.SpikedScale
 -- reworked mythic skills (Mage skills are cast at range)
 ITEM_ANIMATIONS.GlacialPrison = ITEM_ANIMATIONS.WindPull
 ITEM_ANIMATIONS.ArcaneBarrage = ITEM_ANIMATIONS.Fireball
@@ -188,8 +255,89 @@ local records = {} -- [model] = record
 local active = {} -- [record] = playing animation
 
 -- Functions
-local function ease(alpha)
-	return alpha < 0.5 and 2 * alpha * alpha or 1 - (-2 * alpha + 2) ^ 2 / 2
+-- per-key easing: Out = fast start, soft stop (wind-ups / settles); Snap = a whip-fast strike
+-- that lands hard; In = slow start; default = smooth in-out
+local EASES = {
+	InOut = function(a)
+		return a < 0.5 and 2 * a * a or 1 - (-2 * a + 2) ^ 2 / 2
+	end,
+	Out = function(a)
+		return 1 - (1 - a) ^ 3
+	end,
+	In = function(a)
+		return a * a * a
+	end,
+	Snap = function(a)
+		return 1 - (1 - a) ^ 5
+	end,
+}
+local function ease(alpha, style)
+	return (EASES[style or "InOut"] or EASES.InOut)(math.clamp(alpha, 0, 1))
+end
+
+local COMBO_RESET = 1.4 -- seconds without attacking before a combo starts over
+
+-- Weapon trail: a glowing ribbon from the blade's hilt to its tip while a melee swing plays
+local ClassDefinitions = nil
+pcall(function()
+	ClassDefinitions = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("ClassDefinitions", 10))
+end)
+local function findBlade(model)
+	local best, bestLength = nil, 0
+	local gear = model:FindFirstChild("ClassGear")
+	for _, part in ipairs(gear and gear:GetDescendants() or model:GetDescendants()) do
+		if part:IsA("BasePart") and (string.find(part.Name, "Weapon_") or part.Name == "Blade" or part.Name == "Dagger" or part.Name == "MaceHead") then
+			local length = math.max(part.Size.X, part.Size.Y, part.Size.Z)
+			if length > bestLength then
+				best, bestLength = part, length
+			end
+		end
+	end
+	return best
+end
+local function ensureTrail(record)
+	local trail = record.Trail
+	if trail and trail.Parent and trail.Attachment0 and trail.Attachment0.Parent then
+		return trail
+	end
+	local blade = findBlade(record.Model)
+	if not blade then
+		return nil
+	end
+	local size = blade.Size
+	local axis = (size.X >= size.Y and size.X >= size.Z) and Vector3.xAxis or (size.Y >= size.Z and Vector3.yAxis or Vector3.zAxis)
+	local half = math.max(size.X, size.Y, size.Z) / 2
+	local a0 = Instance.new("Attachment")
+	a0.Name = "RF_TrailBase"
+	a0.Position = -axis * half * 0.2
+	a0.Parent = blade
+	local a1 = Instance.new("Attachment")
+	a1.Name = "RF_TrailTip"
+	a1.Position = axis * half
+	a1.Parent = blade
+	-- mesh blades are gripped at one end: put the trail on the side farther from the hand
+	local hand = record.Model:FindFirstChild("RightHand")
+	if hand and (a1.WorldPosition - hand.Position).Magnitude < (blade.CFrame:PointToWorldSpace(-axis * half) - hand.Position).Magnitude then
+		a1.Position = -axis * half
+		a0.Position = axis * half * 0.2
+	end
+	trail = Instance.new("Trail")
+	trail.Name = "RF_SwingTrail"
+	trail.Attachment0, trail.Attachment1 = a0, a1
+	trail.Lifetime = 0.16
+	trail.MinLength = 0.05
+	trail.FaceCamera = false
+	trail.LightEmission = 0.8
+	trail.LightInfluence = 0
+	trail.WidthScale = NumberSequence.new(1, 0.2)
+	trail.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.25), NumberSequenceKeypoint.new(1, 1) })
+	local classDef = ClassDefinitions and ClassDefinitions.Get(record.Model:GetAttribute("Class") or "")
+	local color = classDef and classDef.Color or Color3.fromRGB(255, 220, 160)
+	trail.Color = ColorSequence.new(Color3.new(1, 1, 1), color)
+	trail.Enabled = false
+	trail.Parent = blade
+	record.Trail = trail
+	return trail
 end
 
 local function mirrorPose(pose)
@@ -223,6 +371,10 @@ local function findJoints(model)
 end
 
 local function restore(record)
+	local playing = active[record]
+	if playing and playing.Trail then
+		playing.Trail.Enabled = false
+	end
 	for jointName, handle in pairs(record.Joints) do
 		local base = record.Base[jointName]
 		if base and handle.Instance.Parent then
@@ -243,9 +395,19 @@ local function play(record, kind, itemAbility)
 	end
 	local classAnimations = ANIMATIONS[model:GetAttribute("Class") or ""]
 	local definition = classAnimations and classAnimations[kind]
+	if kind == "Attack" and classAnimations and classAnimations.Combo then
+		-- combos: next swing of the chain, back to the first after a pause
+		local now = os.clock()
+		if now - (record.LastSwingAt or 0) > COMBO_RESET then
+			record.ComboIndex = 0
+		end
+		record.LastSwingAt = now
+		record.ComboIndex = (record.ComboIndex or 0) % #classAnimations.Combo + 1
+		definition = classAnimations.Combo[record.ComboIndex]
+	end
 	if kind == "Item" then
 		-- item skills: dedicated animation, or fall back to the class attack/ability swing
-		definition = ITEM_ANIMATIONS[itemAbility or ""] or (itemAbility == "CleavingArc" and classAnimations and classAnimations.Attack) or (classAnimations and classAnimations.Ability)
+		definition = ITEM_ANIMATIONS[itemAbility or ""] or (itemAbility == "CleavingArc" and classAnimations and (classAnimations.Attack or (classAnimations.Combo and classAnimations.Combo[1]))) or (classAnimations and classAnimations.Ability)
 	end
 	if not definition or model:GetAttribute("Dead") then
 		return
@@ -276,7 +438,14 @@ local function play(record, kind, itemAbility)
 			duration = math.min(duration, cooldown * 0.9)
 		end
 	end
-	active[record] = { Keys = keys, Duration = math.max(0.12, duration), Elapsed = 0 }
+	local trail = nil
+	if classAnimations and classAnimations.Trail and (kind == "Attack" or kind == "Item") then
+		trail = ensureTrail(record)
+		if trail then
+			trail.Enabled = true
+		end
+	end
+	active[record] = { Keys = keys, Duration = math.max(0.12, duration), Elapsed = 0, Trail = trail }
 end
 
 local function poseAt(keys, alpha)
@@ -284,11 +453,12 @@ local function poseAt(keys, alpha)
 	local previousT, previousPose = 0, nil
 	for _, key in ipairs(keys) do
 		if alpha <= key.T then
-			return previousPose, key.Pose, ease((alpha - previousT) / math.max(1e-3, key.T - previousT))
+			return previousPose, key.Pose, ease((alpha - previousT) / math.max(1e-3, key.T - previousT), key.Ease)
 		end
 		previousT, previousPose = key.T, key.Pose
 	end
-	return previousPose, nil, ease((alpha - previousT) / math.max(1e-3, 1 - previousT))
+	-- recovery back to neutral: soft ease-out
+	return previousPose, nil, ease((alpha - previousT) / math.max(1e-3, 1 - previousT), "Out")
 end
 
 local function step(dt)
