@@ -68,7 +68,7 @@ function FogController.Build(radius, seed)
 	builtSeed = seed
 	-- big maps (Royale, radius 420) use double-size fog cells: ~1000 tiles instead of ~4000.
 	-- CraterArena (radius 150) keeps the original cell size.
-	CELL = radius > 200 and Constants.Map.FOG_CELL * 2 or Constants.Map.FOG_CELL
+	CELL = radius > 450 and Constants.Map.FOG_CELL * 3 or (radius > 220 and Constants.Map.FOG_CELL * 2 or Constants.Map.FOG_CELL)
 	local clientAssets = game:GetService("ReplicatedStorage"):FindFirstChild("RuinfallClientAssets")
 	fogTemplate = clientAssets and clientAssets:FindFirstChild("FogPuff")
 	folder = Instance.new("Folder")

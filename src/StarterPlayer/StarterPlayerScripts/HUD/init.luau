@@ -275,13 +275,25 @@ function HUD:Update(state)
 	local inLastStand = myTeamState ~= nil and myTeamState.FlagState == "LastStand" and state.State == STATE.ACTIVE
 	self.LastStand.Visible = inLastStand
 	if inLastStand then
-		if myTeamState.Secured then
-			setText(self.LastStandHint, "FRAGMENT SECURED - timer frozen! Bring it to your flag.")
-			setText(self.LastStandTimer, "TIME REMAINING: " .. math.ceil(myTeamState.LastStandRemaining) .. "  (FROZEN)")
+		-- flag down: restore the base with a Core Fragment before the enemy destroys the flag
+		if myTeamState.CarrierName then
+			setText(self.LastStandHint, string.upper(myTeamState.CarrierName) .. " HAS YOUR FLAG - stop them!")
 		else
-			setText(self.LastStandHint, "Find a Core Fragment and restore your anchor.")
-			setText(self.LastStandTimer, "TIME REMAINING: " .. math.max(0, math.ceil(myTeamState.LastStandRemaining)))
+			setText(self.LastStandHint, "YOUR FLAG IS ON THE GROUND - enemies can grab it")
 		end
+		setText(self.LastStandTimer, myTeamState.Secured and "Core Fragment secured - bring it to your flag base!" or "Find a Core Fragment and restore your flag base")
+	end
+	-- carrying an enemy flag: where to take it
+	local carrying = nil
+	for _, teamState in ipairs(state.Teams or {}) do
+		if teamState.CarrierId and me and teamState.CarrierId == me.EntityId then
+			carrying = teamState
+		end
+	end
+	if carrying and not inLastStand then
+		self.LastStand.Visible = true
+		setText(self.LastStandHint, "YOU HAVE THE " .. string.upper(Constants.GetTeamName(carrying.Team)) .. " FLAG")
+		setText(self.LastStandTimer, "Bring it into your own base to destroy it")
 	end
 end
 
@@ -289,7 +301,7 @@ function HUD:UpdateCenter(state, me, now)
 	local title, sub, color, size = nil, nil, Theme.Colors.Text, 0.07
 	if state.State == STATE.STARTING then
 		title = tostring(math.max(1, math.ceil((state.StateEndsAt or now) - now)))
-		sub = "Destroy enemy flags. Protect your own."
+		sub = "Break enemy flag bases, carry their flags home - last team standing wins."
 		size = 0.11
 	elseif state.State == STATE.ENDING then
 		local myTeam = self.ClientState.GetMyTeam()

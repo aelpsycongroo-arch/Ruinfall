@@ -8,6 +8,7 @@
 -- Services
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
+local PathfindingService = game:GetService("PathfindingService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Constants = require(Shared:WaitForChild("Constants"))
@@ -345,9 +346,78 @@ local function buildRoute(team, start)
 end
 
 -- AI ---------------------------------------------------------------------------------
+local RETARGET_MARGIN = 4 -- switch to a new target that is this much closer
+local PATH_REFRESH = 1.5
+local STUCK_TIME = 1.2
 local function isValidTarget(creep, target)
 	return target and target.Alive and CombatService.AreEnemies(creep, target)
 		and (target.Kind == "Hero" or target.Kind == "Creep") and not CombatService.IsStealthed(target)
+end
+-- ruins are a lower-priority target: minions break them when no enemy unit is around
+local function isRuin(creep, target)
+	return target and target.Alive and target.Kind == "Ruin" and CombatService.AreEnemies(creep, target)
+end
+
+-- Walk toward goal: straight when the way is clear, otherwise along a computed path around
+-- walls and rocks. A minion that has not moved for a while re-plans and sidesteps.
+local function creepMoveTo(creep, goal)
+	local position = CombatService.GetPosition(creep)
+	local humanoid = creep.Humanoid
+	local now = Util.Now()
+	goal = CombatService.ClampToArena(Vector3.new(goal.X, position.Y, goal.Z))
+	-- stuck detection
+	if not creep.LastMoveCheck or now - creep.LastMoveCheck.At >= STUCK_TIME then
+		local moved = creep.LastMoveCheck and Util.FlatDistance(position, creep.LastMoveCheck.Position) or math.huge
+		creep.LastMoveCheck = { At = now, Position = position }
+		if moved < 1 and Util.FlatDistance(position, goal) > 3 then
+			creep.Path, creep.NextPathAt = nil, 0
+			creep.Sidestep = now + 0.6
+			local away = Util.Flat(goal - position)
+			away = away.Magnitude > 0.1 and away.Unit or Vector3.new(1, 0, 0)
+			creep.SidestepTo = position + Vector3.new(-away.Z, 0, away.X) * (math.random() < 0.5 and 4 or -4)
+		end
+	end
+	if creep.Sidestep and now < creep.Sidestep then
+		humanoid:MoveTo(creep.SidestepTo)
+		return
+	end
+	if CombatService.HasLineOfSight(position, goal) then
+		creep.Path = nil
+		humanoid:MoveTo(goal)
+		return
+	end
+	if not creep.Path or not creep.PathGoal or Util.FlatDistance(creep.PathGoal, goal) > 6 or now >= (creep.NextPathAt or 0) then
+		if not creep.Computing then
+			creep.Computing = true
+			creep.NextPathAt = now + PATH_REFRESH
+			creep.PathObject = creep.PathObject or PathfindingService:CreatePath({ AgentRadius = 1.6, AgentHeight = 4, AgentCanJump = false, WaypointSpacing = 6 })
+			local start = position
+			task.spawn(function()
+				local ok = pcall(function()
+					creep.PathObject:ComputeAsync(start, goal)
+				end)
+				creep.Computing = false
+				if ok and creep.PathObject.Status == Enum.PathStatus.Success then
+					creep.Path = creep.PathObject:GetWaypoints()
+					creep.PathIndex = math.min(2, #creep.Path)
+					creep.PathGoal = goal
+				else
+					creep.Path = nil
+				end
+			end)
+		end
+	end
+	local path = creep.Path
+	if path then
+		local waypoint = path[creep.PathIndex]
+		while waypoint and Util.FlatDistance(position, waypoint.Position) < 3 and creep.PathIndex < #path do
+			creep.PathIndex += 1
+			waypoint = path[creep.PathIndex]
+		end
+		humanoid:MoveTo(waypoint and waypoint.Position or goal)
+	else
+		humanoid:MoveTo(goal)
+	end
 end
 
 local function think(creep, now)
@@ -356,12 +426,26 @@ local function think(creep, now)
 	end
 	local position = CombatService.GetPosition(creep)
 	local humanoid = creep.Humanoid
-	-- 1) enemy units nearby
+	-- 1) enemy units nearby - always prefer a clearly closer one
 	local target = creep.Target
+	local nearest = CombatService.FindNearestEnemy(creep, position, WAVE.AggroRange, function(entity)
+		return isValidTarget(creep, entity)
+	end)
 	if not isValidTarget(creep, target) or Util.FlatDistance(position, CombatService.GetPosition(target)) > WAVE.AggroRange + 6 then
-		target = CombatService.FindNearestEnemy(creep, position, WAVE.AggroRange, function(entity)
-			return isValidTarget(creep, entity)
-		end)
+		target = nearest
+	elseif nearest and nearest ~= target
+		and Util.FlatDistance(position, CombatService.GetPosition(nearest)) + RETARGET_MARGIN < Util.FlatDistance(position, CombatService.GetPosition(target)) then
+		target = nearest
+	end
+	-- 1b) a ruin nearby when no enemy unit is around
+	if not target then
+		if isRuin(creep, creep.Target) and Util.FlatDistance(position, CombatService.GetPosition(creep.Target)) <= WAVE.AggroRange + 6 then
+			target = creep.Target
+		else
+			target = CombatService.FindNearestEnemy(creep, position, WAVE.AggroRange, function(entity)
+				return isRuin(creep, entity)
+			end)
+		end
 	end
 	-- 2) the enemy flag when close to it
 	if not target and creep.TargetBase then
@@ -386,7 +470,7 @@ local function think(creep, now)
 				CombatService.ApplyDamage(creep, target, creep.HitDamage or WAVE.Damage, { BasicAttack = true })
 			end
 		else
-			humanoid:MoveTo(targetPosition)
+			creepMoveTo(creep, targetPosition)
 		end
 		return
 	end
@@ -408,7 +492,7 @@ local function think(creep, now)
 			creep.RouteIndex += 1
 		end
 	else
-		humanoid:MoveTo(offsetWaypoint)
+		creepMoveTo(creep, offsetWaypoint)
 	end
 end
 

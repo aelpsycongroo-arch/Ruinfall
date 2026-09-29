@@ -56,11 +56,11 @@ function TopLeftPanel:Update(state, myTeam, myTeamState)
 		setText(self.FlagValue, string.format("%d / %d", myTeamState.FlagHealth, myTeamState.FlagMaxHealth))
 		self.FlagValue.TextColor3 = Theme.Colors.Text
 	elseif myTeamState.FlagState == "LastStand" then
-		setText(self.FlagValue, "DESTROYED")
+		setText(self.FlagValue, myTeamState.CarrierName and "TAKEN!" or "DOWN")
 		self.FlagValue.TextColor3 = Theme.Colors.Red
 		fraction = 0
 	else
-		setText(self.FlagValue, myTeamState.Eliminated and "ELIMINATED" or "FLAGLESS")
+		setText(self.FlagValue, myTeamState.Eliminated and "ELIMINATED" or "DESTROYED")
 		self.FlagValue.TextColor3 = Theme.Colors.Muted
 		fraction = 0
 	end

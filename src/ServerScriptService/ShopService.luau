@@ -51,6 +51,15 @@ function ShopService.CanShop(participant)
 	if not participant or participant.Spectator then
 		return false, "Spectators cannot shop"
 	end
+	-- a team whose flag was destroyed (carried into an enemy base) can no longer buy anything
+	local baseModule = script.Parent:FindFirstChild("BaseService")
+	local okBase, BaseService = pcall(function()
+		return baseModule and require(baseModule)
+	end)
+	local baseState = okBase and BaseService and participant.Team and BaseService.GetState(participant.Team)
+	if baseState and baseState.FlagState == "Lost" then
+		return false, "Your flag was destroyed - the shop is closed"
+	end
 	local entity = participant.Entity
 	local isAlive = entity and entity.Alive
 	if isAlive and not isNearBase(participant) then

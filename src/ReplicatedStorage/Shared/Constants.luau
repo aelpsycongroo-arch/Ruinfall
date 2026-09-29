@@ -93,6 +93,11 @@ Constants.Flag = {
 	REANCHOR_RADIUS = 9,
 	REANCHOR_TIME = 2,
 	VISION_RADIUS = 40,
+	-- a destroyed flag base drops its banner: enemies grab it by walking into it and destroy
+	-- it for good by carrying it into their own (intact) base
+	PICKUP_RADIUS = 4.5,
+	CAPTURE_RADIUS = 10,
+	DROP_OFFSET = 7, -- studs from the base centre toward the arena centre
 }
 Constants.LAST_STAND_DURATION = 15
 
@@ -142,11 +147,11 @@ Constants.Vision = {
 -- in supply chests, can be revived once by a planted cross, and the play zone shrinks
 -- until one hero is left.
 Constants.Royale = {
-	MAP_RADIUS = 420,
+	MAP_RADIUS = 520, -- Shattered Expanse (was 420)
 	DEPLOY_TIME = 25, -- seconds to pick a landing spot on the map
-	SPAWN_EXCLUSION = 60, -- a picked spot blocks this radius for everyone else
+	SPAWN_EXCLUSION = 70, -- a picked spot blocks this radius for everyone else
 	SPAWN_EDGE_MARGIN = 30, -- keep landing spots this far inside the map edge
-	START_RUINS = 34, -- loot ruins placed at match start
+	START_RUINS = 46, -- loot ruins placed at match start
 	RUIN_HEALTH = 450,
 	RUIN_RESPAWN_INTERVAL = 50, -- a fresh ruin appears inside the zone this often
 	LOOT_PER_RUIN = 2, -- items in the supply chest a ruin leaves behind
@@ -154,7 +159,7 @@ Constants.Royale = {
 	PLAYERS_PER_START_WEAPON = 2, -- 18 players -> 9 weapon caches on the map at the start
 	REVIVE_DELAY = 6, -- seconds from death to rising again at your planted cross
 	CROSS_HEALTH = 450, -- enemies can smash a planted cross
-	ZONE_START_DELAY = 70, -- seconds before the first shrink starts
+	ZONE_START_DELAY = 85, -- seconds before the first shrink starts
 	-- each phase: wait, then shrink over Shrink seconds to Radius (fraction of the map radius)
 	ZONE_PHASES = {
 		-- storm damage (% of max HP per second) doubles every phase
@@ -184,7 +189,7 @@ Constants.Loot = {
 
 -- Map --------------------------------------------------------------------------------
 Constants.Map = {
-	RADIUS = 150,
+	RADIUS = 200, -- Crater Arena (was 150)
 	GROUND_Y = 0,
 	WALL_HEIGHT = 10,
 	FOG_CELL = 12,

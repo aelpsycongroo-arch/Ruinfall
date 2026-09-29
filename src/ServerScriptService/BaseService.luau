@@ -1,13 +1,16 @@
 -- BaseService: team flags (spawn anchors), base turrets and healing,
 -- the Last Stand timer and re-anchoring with Core Fragments.
 --
--- Flag states:
---   Intact    - team respawns normally.
---   LastStand - flag destroyed; 15s to secure a Core Fragment (timer freezes
---               while any living member carries one), then re-anchor at the
---               flag site to restore it. Dead members wait, no respawns.
---   Lost      - Last Stand failed; permanently Flagless. Members who die are
---               eliminated.
+-- Flag states (internal names kept for the rest of the game):
+--   Intact    - team respawns and shops normally.
+--   LastStand - "FLAG DOWN": the flag base was destroyed and dropped its banner on the
+--               ground. An enemy picks it up by walking into it; if the carrier dies it
+--               drops where they fell. While the banner is not destroyed the team can
+--               re-anchor the base with a Core Fragment (restores the base, banner returns).
+--               Dead members wait (no respawn) until then.
+--   Lost      - "FLAG DESTROYED": an enemy carried the banner into their own intact base.
+--               No respawns, no shopping, no restoring - the team fights on until its
+--               last member falls. The last team with living members wins.
 
 -- Services
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -253,17 +256,139 @@ local function teamHasCarrier(team)
 	return false
 end
 
+-- The dropped / carried banner ------------------------------------------------------------
+local function bannerModel(team, anchored)
+	local color = Constants.GetTeamColor(team)
+	local model = Instance.new("Model")
+	model.Name = "DroppedFlag_" .. team
+	local pole = newPart({ Name = "Pole", Size = Vector3.new(0.35, 7, 0.35), Color = Color3.fromRGB(90, 70, 45), Material = Enum.Material.Wood, CanCollide = false })
+	pole.Anchored = anchored
+	pole.Parent = model
+	local cloth = newPart({ Name = "Cloth", Size = Vector3.new(0.15, 2.6, 3.4), Color = color, Material = Enum.Material.Fabric, CanCollide = false })
+	cloth.Anchored = anchored
+	cloth.Parent = model
+	local glow = newPart({ Name = "Glow", Shape = Enum.PartType.Ball, Size = Vector3.new(1, 1, 1), Color = color, Material = Enum.Material.Neon, CanCollide = false })
+	glow.Anchored = anchored
+	glow.Parent = model
+	local light = Instance.new("PointLight")
+	light.Color = color
+	light.Range = 12
+	light.Brightness = 2
+	light.Parent = glow
+	for _, part in ipairs({ pole, cloth, glow }) do
+		part.CanQuery = false
+		part.CanTouch = false
+		part.Massless = true
+	end
+	model.PrimaryPart = pole
+	return model, pole, cloth, glow
+end
+
+local function placeBanner(model, pole, cloth, glow, cframe)
+	pole.CFrame = cframe * CFrame.new(0, 3.5, 0)
+	cloth.CFrame = cframe * CFrame.new(0, 5.4, -1.8)
+	glow.CFrame = cframe * CFrame.new(0, 7.2, 0)
+end
+
+local function clearBanner(state)
+	if state.BannerModel then
+		state.BannerModel:Destroy()
+		state.BannerModel = nil
+	end
+	local carrier = state.Carrier
+	if carrier then
+		carrier.CarryingFlag = nil
+		if carrier.Model then
+			carrier.Model:SetAttribute("CarryingFlag", nil)
+		end
+	end
+	state.Carrier = nil
+	state.DropPosition = nil
+end
+
+local function dropBanner(state, position)
+	clearBanner(state)
+	local ground = Vector3.new(position.X, state.Base.Position.Y, position.Z)
+	local model, pole, cloth, glow = bannerModel(state.Team, true)
+	placeBanner(model, pole, cloth, glow, CFrame.new(ground) * CFrame.Angles(0, 0, math.rad(12)))
+	model.Parent = state.Base.Folder
+	state.BannerModel = model
+	state.DropPosition = ground
+end
+
+local function pickUpBanner(state, hero)
+	clearBanner(state)
+	local root = hero.Root
+	local model, pole, cloth, glow = bannerModel(state.Team, false)
+	placeBanner(model, pole, cloth, glow, root.CFrame * CFrame.new(0.9, -1.2, 0.8))
+	for _, part in ipairs({ pole, cloth, glow }) do
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = root
+		weld.Part1 = part
+		weld.Parent = part
+	end
+	model.Parent = hero.Model
+	state.BannerModel = model
+	state.Carrier = hero
+	hero.CarryingFlag = state.Team
+	hero.Model:SetAttribute("CarryingFlag", state.Team)
+	CombatService.BreakStealth(hero)
+	local name = hero.Participant and hero.Participant.Name or "An enemy"
+	Net.Notify(PlayerService.GetTeamPlayers(state.Team), "YOUR FLAG WAS TAKEN", "Danger", { Banner = true, Sub = name .. " has it - kill them, or restore your base with a Core Fragment!" })
+	Net.Notify(PlayerService.GetTeamPlayers(hero.Team), "ENEMY FLAG TAKEN", "Success", { Banner = true, Sub = "Carry it into your own base to destroy it" })
+	Net.Notify(nil, string.format("%s took the %s flag", name, Constants.GetTeamName(state.Team)), "Info")
+end
+
 local function setLost(state, reason)
+	clearBanner(state)
 	state.FlagState = "Lost"
 	state.LastStandRemaining = 0
 	state.Secured = false
 	setFlagVisual(state, "Lost")
 	local teamName = Constants.GetTeamName(state.Team)
-	Net.Notify(PlayerService.GetTeamPlayers(state.Team), "LAST STAND FAILED", "Danger", { Banner = true, Sub = reason .. " - no more respawns. Survive!" })
-	Net.Notify(nil, teamName .. " is permanently Flagless", "Warning")
+	Net.Effect("FlagDestroyed", { Position = state.Base.Position, Color = Constants.GetTeamColor(state.Team) })
+	Net.Notify(PlayerService.GetTeamPlayers(state.Team), "YOUR FLAG WAS DESTROYED", "Danger", { Banner = true, Sub = reason .. " - no more respawns or shopping. Fight to the last!" })
+	Net.Notify(nil, teamName .. " FLAG DESTROYED - they fight on without respawns", "Warning")
+end
+
+-- enemies walk into a dropped banner to grab it; carriers destroy it at their own base
+local function processBanner(state)
+	if state.FlagState ~= "LastStand" then
+		return
+	end
+	local carrier = state.Carrier
+	if carrier then
+		if not carrier.Alive or not carrier.Model or not carrier.Model.Parent then
+			local where = state.CarrierLastPosition or state.Base.Position
+			dropBanner(state, where)
+			Net.Notify(nil, string.format("The %s flag was dropped", Constants.GetTeamName(state.Team)), "Info")
+			return
+		end
+		local position = CombatService.GetPosition(carrier)
+		state.CarrierLastPosition = position
+		local home = BaseService.Teams[carrier.Team]
+		if home and home.FlagState == "Intact" and Util.FlatDistance(position, home.Base.Position) <= FLAG.CAPTURE_RADIUS then
+			if carrier.Participant then
+				carrier.Participant.Stats.Flags += 1
+			end
+			local name = carrier.Participant and carrier.Participant.Name or Constants.GetTeamName(carrier.Team)
+			setLost(state, name .. " destroyed it at the " .. Constants.GetTeamName(carrier.Team) .. " base")
+		end
+		return
+	end
+	if not state.DropPosition then
+		return
+	end
+	local grabber = CombatService.FindNearestEnemy(state.FlagEntity, state.DropPosition, FLAG.PICKUP_RADIUS, function(entity)
+		return entity.Kind == "Hero" and entity.Alive and not entity.CarryingFlag
+	end)
+	if grabber then
+		pickUpBanner(state, grabber)
+	end
 end
 
 local function restoreFlag(state, hero)
+	clearBanner(state) -- the banner flies home
 	state.FlagState = "Intact"
 	state.LastStandRemaining = 0
 	state.Secured = false
@@ -271,23 +396,25 @@ local function restoreFlag(state, hero)
 	setFlagVisual(state, "Intact")
 	local teamName = Constants.GetTeamName(state.Team)
 	Net.Effect("FlagRestored", { Position = state.Base.Position, Color = Constants.GetTeamColor(state.Team) })
-	Net.Notify(PlayerService.GetTeamPlayers(state.Team), "FLAG RESTORED", "Success", { Banner = true, Sub = (hero.Participant and hero.Participant.Name or "Your team") .. " re-anchored the flag. Respawns are back!" })
+	Net.Notify(PlayerService.GetTeamPlayers(state.Team), "FLAG RESTORED", "Success", { Banner = true, Sub = (hero.Participant and hero.Participant.Name or "Your team") .. " re-anchored the flag base. Your flag is home and respawns are back!" })
 	Net.Notify(nil, teamName .. " restored their flag", "Info")
 	BaseService.FlagRestored:Fire(state.Team)
 end
 
 local function onFlagDestroyed(state, killer)
 	state.FlagState = "LastStand"
-	state.LastStandRemaining = Constants.LAST_STAND_DURATION
+	state.LastStandRemaining = 0
 	state.Secured = teamHasCarrier(state.Team)
 	state.Channels = {}
 	setFlagVisual(state, "Destroyed")
-	if killer and killer.Participant then
-		killer.Participant.Stats.Flags += 1
-	end
+	-- the base drops its banner a few steps toward the arena centre
+	local toCenter = Util.Flat(Vector3.zero - state.Base.Position)
+	toCenter = toCenter.Magnitude > 0.1 and toCenter.Unit or Vector3.new(0, 0, 1)
+	dropBanner(state, state.Base.Position + toCenter * FLAG.DROP_OFFSET)
 	local teamName = Constants.GetTeamName(state.Team)
 	Net.Effect("FlagDestroyed", { Position = state.Base.Position, Color = Constants.GetTeamColor(state.Team) })
-	Net.Notify(nil, teamName .. " FLAG DESTROYED", "Danger")
+	Net.Notify(nil, teamName .. " FLAG BASE DESTROYED - their flag is on the ground!", "Danger")
+	Net.Notify(PlayerService.GetTeamPlayers(state.Team), "YOUR FLAG BASE FELL", "Danger", { Banner = true, Sub = "Restore it with a Core Fragment before an enemy carries your flag home" })
 	BaseService.FlagDestroyed:Fire(state.Team, killer)
 end
 
@@ -354,15 +481,9 @@ local function tick(dt)
 					end
 				end
 			elseif state.FlagState == "LastStand" then
+				-- no timer: the flag stays down until it is restored or destroyed
 				state.Secured = teamHasCarrier(team)
-				if #getAliveMembers(team) == 0 then
-					setLost(state, "No survivors were left to restore the flag")
-				elseif not state.Secured then
-					state.LastStandRemaining -= dt
-					if state.LastStandRemaining <= 0 then
-						setLost(state, "No Core Fragment was secured in time")
-					end
-				end
+				processBanner(state)
 			end
 			if state.FlagState ~= "Lost" then
 				processChannels(state, dt)
@@ -383,6 +504,14 @@ function BaseService.Init()
 		end
 	end)
 	CombatService.EntityDied:Connect(function(entity, killer)
+		if entity.CarryingFlag then
+			local carried = BaseService.Teams[entity.CarryingFlag]
+			if carried and carried.Carrier == entity and carried.FlagState == "LastStand" then
+				dropBanner(carried, CombatService.GetPosition(entity))
+				Net.Notify(nil, string.format("The %s flag was dropped", Constants.GetTeamName(carried.Team)), "Info")
+			end
+			entity.CarryingFlag = nil
+		end
 		if entity.Kind == "Flag" then
 			local state = BaseService.Teams[entity.Team]
 			if state and state.FlagEntity == entity then
@@ -403,7 +532,7 @@ function BaseService.Init()
 		local state = BaseService.Teams[hero.Team]
 		if state and state.FlagState == "LastStand" then
 			state.Secured = true
-			Net.Notify(PlayerService.GetTeamPlayers(hero.Team), "FRAGMENT SECURED", "Fragment", { Banner = true, Sub = "Last Stand timer frozen - bring it back to your anchor!" })
+			Net.Notify(PlayerService.GetTeamPlayers(hero.Team), "CORE FRAGMENT SECURED", "Fragment", { Banner = true, Sub = "Bring it to your flag base to restore it!" })
 		end
 	end)
 end
@@ -470,6 +599,7 @@ function BaseService.MarkEliminated(team)
 		return
 	end
 	state.Eliminated = true
+	clearBanner(state)
 	if state.FlagEntity.Alive then
 		state.FlagEntity.Alive = false
 		state.FlagEntity.Model:SetAttribute("Dead", true)
@@ -498,6 +628,9 @@ end
 
 function BaseService.Cleanup()
 	BaseService.Stop()
+	for _, state in pairs(BaseService.Teams) do
+		clearBanner(state)
+	end
 	table.clear(BaseService.Teams)
 end
 
@@ -513,6 +646,10 @@ function BaseService.Serialize()
 			Secured = state.Secured,
 			Eliminated = state.Eliminated,
 			Position = state.Base.Position,
+			DropPosition = state.DropPosition,
+			CarrierId = state.Carrier and state.Carrier.Id or nil,
+			CarrierName = state.Carrier and state.Carrier.Participant and state.Carrier.Participant.Name or nil,
+			CarrierPosition = state.Carrier and state.Carrier.Alive and CombatService.GetPosition(state.Carrier) or nil,
 		})
 	end
 	table.sort(list, function(a, b)

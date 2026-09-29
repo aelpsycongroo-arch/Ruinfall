@@ -412,7 +412,7 @@ local function updateObjective(record)
 			record.Tag.Text = ""
 		else
 			record.Bar.Set(0)
-			record.Tag.Text = flagState == "LastStand" and "LAST STAND - RE-ANCHOR HERE" or "FLAGLESS"
+			record.Tag.Text = flagState == "LastStand" and "FLAG DOWN - RESTORE WITH A CORE" or "FLAG DESTROYED"
 			record.Tag.TextColor3 = flagState == "LastStand" and COLORS.Fragment or COLORS.Subtext
 		end
 	end

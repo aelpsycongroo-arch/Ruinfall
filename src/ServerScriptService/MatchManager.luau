@@ -189,9 +189,9 @@ local function onHeroDied(entity, killer)
 	Net.Notify(nil, string.format("%s was slain by %s", participant.Name, describeKiller(killer)), "Info")
 	if participant.Player then
 		if participant.State == "Eliminated" then
-			Net.Notify(participant.Player, "ELIMINATED", "Danger", { Banner = true, Sub = "Your team is Flagless - no respawn. Spectating." })
+			Net.Notify(participant.Player, "ELIMINATED", "Danger", { Banner = true, Sub = "Your flag was destroyed - no respawn. Spectating." })
 		elseif participant.RespawnAt == nil then
-			Net.Notify(participant.Player, "YOU DIED", "Warning", { Banner = true, Sub = "No respawn until a teammate restores the flag" })
+			Net.Notify(participant.Player, "YOU DIED", "Warning", { Banner = true, Sub = "Your flag is down - no respawn until a teammate restores the base with a Core Fragment" })
 		end
 	end
 	MatchManager.Broadcast()
@@ -221,7 +221,7 @@ function MatchManager.ProcessRespawns()
 					participant.RespawnAt = nil
 					PlayerService.SetPlayerAttributes(participant)
 					if participant.Player then
-						Net.Notify(participant.Player, "ELIMINATED", "Danger", { Banner = true, Sub = "Your flag could not be restored. Spectating." })
+						Net.Notify(participant.Player, "ELIMINATED", "Danger", { Banner = true, Sub = "Your flag was destroyed. Spectating." })
 					end
 				elseif participant.RespawnAt then
 					participant.RespawnAt = nil

@@ -530,6 +530,41 @@ local function think(brain)
 		brain.TargetId = nil
 	end
 
+	-- 0. Flag rules: carry a stolen enemy flag home, grab a dropped one, chase our own carrier
+	if entity.CarryingFlag and home then
+		setState(brain, "Carry Flag")
+		if enemy and Util.FlatDistance(position, CombatService.GetPosition(enemy)) <= classDef.AttackRange + 1 then
+			basicAttack(brain, enemy, CombatService.GetPosition(enemy))
+		end
+		moveTo(brain, home)
+		return
+	end
+	if baseState and baseState.FlagState == "LastStand" and baseState.Carrier and baseState.Carrier.Alive
+		and not entity.CarryingFragment and Util.FlatDistance(position, CombatService.GetPosition(baseState.Carrier)) < 90 then
+		setState(brain, "Chase Flag Carrier")
+		engage(brain, baseState.Carrier)
+		return
+	end
+	if baseState and baseState.FlagState == "Intact" and healthRatio > 0.35 then
+		local best, bestDistance = nil, 140
+		for team, other in pairs(BaseService.Teams) do
+			if team ~= entity.Team and other.FlagState == "LastStand" and other.DropPosition and not other.Carrier then
+				local distance = Util.FlatDistance(position, other.DropPosition)
+				if distance < bestDistance then
+					best, bestDistance = other, distance
+				end
+			end
+		end
+		if best then
+			setState(brain, "Grab Flag")
+			if enemy and Util.FlatDistance(position, CombatService.GetPosition(enemy)) <= classDef.AttackRange + 1 then
+				basicAttack(brain, enemy, CombatService.GetPosition(enemy))
+			end
+			moveTo(brain, best.DropPosition)
+			return
+		end
+	end
+
 	-- 1. Retreat to heal at an intact base
 	if home and baseState.FlagState == "Intact" and (healthRatio < difficulty.RetreatHealth or (brain.Retreating and healthRatio < 0.85)) then
 		brain.Retreating = true

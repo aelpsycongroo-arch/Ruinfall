@@ -809,7 +809,7 @@ function MapGenerator.GenerateRoyale(seed)
 	buildCenter(mapData, folders)
 	-- monster camps spread over the whole map
 	local campIndex, attempts = 0, 0
-	while campIndex < 16 and attempts < 600 do
+	while campIndex < 22 and attempts < 900 do
 		attempts += 1
 		local position = Util.RotateY(Vector3.new(0, 0, rng:NextNumber(60, mapData.Radius - 40)), rng:NextNumber(0, math.pi * 2))
 		local ok = true
@@ -824,19 +824,19 @@ function MapGenerator.GenerateRoyale(seed)
 			placeCamp(mapData, folders, rng, campIndex, position, math.atan2(position.X, position.Z))
 		end
 	end
-	for _ = 1, 5 do
+	for _ = 1, 8 do
 		buildWalls(mapData, folders, rng)
 	end
-	for _ = 1, 5 do
+	for _ = 1, 8 do
 		buildRocks(mapData, folders, rng)
 	end
-	for _ = 1, 6 do
+	for _ = 1, 9 do
 		buildBrush(mapData, folders, rng)
 	end
 	buildDecor(mapData, folders, rng)
 	-- ruined watchtowers as landmarks (decor only, sit on rocks-free ground)
 	local drng = mapData.DecorRandom
-	for _ = 1, 18 do
+	for _ = 1, 26 do
 		local position = Util.RotateY(Vector3.new(0, 0, drng:NextNumber(40, mapData.Radius - 30)), drng:NextNumber(0, math.pi * 2))
 		if circleIsClear(mapData, position, 4, 2) then
 			PropBuilder.Column(folders.Decor, position, drng:NextNumber(9, 16), { Broken = drng:NextNumber() < 0.7, Random = drng })

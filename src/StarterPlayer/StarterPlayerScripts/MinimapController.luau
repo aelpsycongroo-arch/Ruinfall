@@ -175,6 +175,13 @@ local function updateDynamic()
 		else
 			icon.BackgroundColor3 = color
 		end
+		-- the dropped / carried banner of a downed flag (everyone can see it)
+		local banner = teamState.FlagState == "LastStand" and (teamState.CarrierPosition or teamState.DropPosition)
+		if banner then
+			local marker = acquire("FlagBanner", diamondFactory(12))
+			marker.Position = toMap(banner)
+			marker.BackgroundColor3 = blink and Color3.new(1, 1, 1) or color
+		end
 	end
 	for _, camp in ipairs(state.Camps or {}) do
 		if FogController.IsExplored(camp.Position) then

@@ -24,9 +24,9 @@ local function flagText(teamState)
 	elseif teamState.FlagState == "Intact" then
 		return "Flag " .. teamState.FlagHealth, Theme.Colors.Text
 	elseif teamState.FlagState == "LastStand" then
-		return teamState.Secured and "Last Stand: Secured" or string.format("Last Stand %d", math.ceil(teamState.LastStandRemaining or 0)), Theme.Colors.Red
+		return teamState.CarrierName and "Flag Taken!" or "Flag Down", Theme.Colors.Red
 	end
-	return "Flagless", Theme.Colors.Muted
+	return "Flag Destroyed", Theme.Colors.Muted
 end
 
 local function bindSides(plaque)
