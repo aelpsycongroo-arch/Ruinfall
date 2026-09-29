@@ -99,6 +99,12 @@ function FogController.Build(radius, seed)
 					part.Size = Vector3.new(CELL, 0.2, CELL)
 					part.Position = center + Vector3.new(0, FOG_HEIGHT, 0)
 				end
+				-- fog must never cast shadows: the flat puffs float above the ground and their
+				-- edges left thin dark shadow lines across the arena (even where the fog is clear)
+				part.CastShadow = false
+				part.CanCollide = false
+				part.CanQuery = false
+				part.CanTouch = false
 				part.Transparency = UNEXPLORED
 				part.Parent = folder
 				tiles[cellKey(ix, iz)] = { Part = part, Center = center, Current = UNEXPLORED, Target = UNEXPLORED, Explored = false }
