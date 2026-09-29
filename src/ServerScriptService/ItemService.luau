@@ -1788,6 +1788,10 @@ function ItemService.HandleRequest(player, action, arg1, arg2)
 	elseif action == "Swap" then
 		return ItemService.Swap(player, participant, arg1, arg2)
 	elseif action == "UpgradeMinions" or action == "BuyCreeps" then
+		-- the Supplies section (minion upgrades) was removed from the shop
+		if true then
+			return reject(player, "Minion upgrades are no longer sold")
+		end
 		-- team-wide minion upgrade (minion waves themselves spawn automatically)
 		local creepService = getCreepService()
 		if not creepService then

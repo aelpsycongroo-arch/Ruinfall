@@ -1347,7 +1347,7 @@ function ItemDefinitions.GetItemGoldValue(item)
 	local passive = (item and (item.PassiveReflect or item.PassiveSplash)) and ItemDefinitions.PASSIVE_VALUE or 0
 	if item and item.Passive then -- passive items: their automatic effect's gold value
 		-- (explicit Value, else whatever the price leaves after the stats - see SharedGameRules)
-		passive = item.Passive.Value or math.max(0, (item.Price or 0) - stats)
+		passive = item.Passive.Value or math.max(0, (item.BasePrice or item.Price or 0) - stats)
 	end
 	return stats, skill, passive, stats + skill + passive
 end
@@ -1370,6 +1370,16 @@ function ItemDefinitions.GetStatText(item)
 		table.insert(parts, string.format("reflects %d%% of damage taken back to attackers", item.PassiveReflect * 100))
 	end
 	return table.concat(parts, ", ")
+end
+
+-- Global price increase: every shop item (active items, boots, passives) costs 35% more,
+-- rounded to 5 gold (item stat / skill values stay as tuned). Sell values follow the price.
+ItemDefinitions.PRICE_MULTIPLIER = 1.35
+for _, item in pairs(ItemDefinitions.Items) do
+	if type(item.Price) == "number" then
+		item.BasePrice = item.Price
+		item.Price = math.floor(item.Price * ItemDefinitions.PRICE_MULTIPLIER / 5 + 0.5) * 5
+	end
 end
 
 -- Uploaded painted icons (Shared.IconIds, filled by tools/icons/apply_icons.py) override the

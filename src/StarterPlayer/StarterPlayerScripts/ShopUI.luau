@@ -141,8 +141,7 @@ function ShopUI.new(screen, clientState)
 	}
 	self.Tabs = {}
 	self.Pages = {}
-	local tabKeys = table.clone(ItemDefinitions.Roles)
-	table.insert(tabKeys, "Supplies")
+	local tabKeys = table.clone(ItemDefinitions.Roles) -- (the Supplies tab was removed)
 	local tabBar = New("Frame", { Name = "Tabs", Position = UDim2.fromOffset(CATALOG_X, 50), Size = UDim2.fromOffset(CATALOG_W, 30), BackgroundTransparency = 1, Parent = panel })
 	New("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder, Parent = tabBar })
 	local tabWidth = math.floor((CATALOG_W - 3 * (#tabKeys - 1)) / #tabKeys)

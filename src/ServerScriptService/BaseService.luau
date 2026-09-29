@@ -7,7 +7,8 @@
 --               ground. An enemy picks it up by walking into it; if the carrier dies it
 --               drops where they fell - and then the OWNERS may grab it too and carry it
 --               back into their base ruins to rebuild the base. While the banner is not
---               destroyed the team can also re-anchor the base with a Core Fragment.
+--               destroyed the team can also re-anchor the base with a Core Fragment -
+--               except while an enemy is carrying the flag (catch the carrier first).
 --               Dead members wait (no respawn) until then.
 --   Lost      - "FLAG DESTROYED": an enemy carried the banner into their own intact base.
 --               No respawns, no shopping, no restoring - the team fights on until its
@@ -342,7 +343,7 @@ local function pickUpBanner(state, hero)
 		Net.Notify(nil, string.format("%s recovered the %s flag", name, Constants.GetTeamName(state.Team)), "Info")
 		return
 	end
-	Net.Notify(PlayerService.GetTeamPlayers(state.Team), "YOUR FLAG WAS TAKEN", "Danger", { Banner = true, Sub = name .. " has it - kill them, or restore your base with a Core Fragment!" })
+	Net.Notify(PlayerService.GetTeamPlayers(state.Team), "YOUR FLAG WAS TAKEN", "Danger", { Banner = true, Sub = name .. " has it - kill them to drop it and bring it home!" })
 	Net.Notify(PlayerService.GetTeamPlayers(hero.Team), "ENEMY FLAG TAKEN", "Success", { Banner = true, Sub = "Carry it into your own base to destroy it" })
 	Net.Notify(nil, string.format("%s took the %s flag", name, Constants.GetTeamName(state.Team)), "Info")
 end
@@ -445,7 +446,11 @@ end
 
 local function processChannels(state, dt)
 	local flag = state.FlagEntity
-	local wantsRestore = state.FlagState == "LastStand"
+	-- while an enemy is running off with the flag it cannot be restored with a Core Fragment:
+	-- the team has to kill the carrier and bring the flag back (or restore once it lies on
+	-- the ground again)
+	local enemyHasFlag = state.Carrier ~= nil and state.Carrier.Team ~= state.Team
+	local wantsRestore = state.FlagState == "LastStand" and not enemyHasFlag
 	local wantsRepair = state.FlagState == "Intact" and flag.Health < flag.MaxHealth * 0.9
 	for _, hero in ipairs(getAliveMembers(state.Team)) do
 		local inRange = Util.FlatDistance(CombatService.GetPosition(hero), state.Base.Position) <= FLAG.REANCHOR_RADIUS

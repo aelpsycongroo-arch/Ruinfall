@@ -75,6 +75,11 @@ function ShopService.HandleRequest(player, itemKey)
 	if type(itemKey) ~= "string" then
 		return
 	end
+	-- the Supplies section (stackable stat items) was removed from the shop
+	if true then
+		Net.Notify(player, "Stat supplies are no longer sold - buy items instead", "Warning")
+		return
+	end
 	if MatchManager.State ~= STATE.ACTIVE then
 		Net.Notify(player, "Shop is only available during a match", "Warning")
 		return
