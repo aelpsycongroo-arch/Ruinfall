@@ -15,11 +15,12 @@ SettingsSchema.Actions = {
 	{ Key = "Potion", Label = "Drink potion", Default = "H" },
 	{ Key = "Shop", Label = "Open shop", Default = "B" },
 	{ Key = "Gear", Label = "Gear panel (Shattered Expanse)", Default = "I" },
+	{ Key = "Scoreboard", Label = "Scoreboard (toggle)", Default = "Tab" },
 }
 
 SettingsSchema.Reserved = {
 	W = true, A = true, S = true, D = true, Up = true, Down = true, Left = true, Right = true,
-	Escape = true, Slash = true, Tab = true, Backquote = true, Unknown = true, MouseButton1 = true,
+	Escape = true, Slash = true, Backquote = true, Unknown = true, MouseButton1 = true,
 }
 
 SettingsSchema.HUD_SCALE_MIN = 0.7

@@ -14,6 +14,7 @@ local ResultsUI = require(script.Parent:WaitForChild("ResultsUI"))
 local Notifications = require(script.Parent:WaitForChild("Notifications"))
 local ShopUI = require(script.Parent:WaitForChild("ShopUI"))
 local RoyaleUI = require(script.Parent:WaitForChild("RoyaleUI"))
+local ScoreboardUI = require(script.Parent:WaitForChild("ScoreboardUI"))
 
 -- Constants
 local STATE = Constants.MatchState
@@ -61,6 +62,13 @@ function UIController.Init(clientState, combatController)
 		royale = { Update = function() end, Tick = function() end }
 	end
 	UIController.Royale = royale
+	-- in-match scoreboard (Tab): K / D / A and every player's gear; pcall like the shop
+	local scoreOk, scoreboard = pcall(ScoreboardUI.new, screen, clientState)
+	if not scoreOk then
+		warn("[Ruinfall] Scoreboard failed to build:", scoreboard)
+		scoreboard = { Update = function() end }
+	end
+	UIController.Scoreboard = scoreboard
 
 	clientState.Notified:Connect(function(payload)
 		notifications:Push(payload)
@@ -91,6 +99,7 @@ function UIController.Init(clientState, combatController)
 		results:Update(state)
 		shop:Update(state)
 		royale:Update(state)
+		scoreboard:Update(state)
 	end)
 	applyMatchState(clientState.GetMatchState())
 

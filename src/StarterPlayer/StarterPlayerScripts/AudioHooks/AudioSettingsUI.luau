@@ -182,7 +182,7 @@ buildControls = function(panel, GameSettings)
 	local footer = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, -6, 0, 60), LayoutOrder = 100, Parent = page })
 	new("TextLabel", {
 		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 20), Font = Enum.Font.Gotham, TextSize = 11, TextColor3 = COLORS.Parchment,
-		TextTransparency = 0.3, TextWrapped = true, Text = "WASD move and left click attack are fixed. Esc cancels.", Parent = footer,
+		TextTransparency = 0.3, TextWrapped = true, Text = "WASD move, left click attack and Esc are fixed. Esc cancels.", Parent = footer,
 	})
 	local reset = new("TextButton", {
 		AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 24), Size = UDim2.fromOffset(180, 30), BackgroundColor3 = COLORS.Crimson,
