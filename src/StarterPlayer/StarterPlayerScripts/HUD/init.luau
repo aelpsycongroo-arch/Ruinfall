@@ -276,8 +276,12 @@ function HUD:Update(state)
 	self.LastStand.Visible = inLastStand
 	if inLastStand then
 		-- flag down: restore the base with a Core Fragment before the enemy destroys the flag
-		if myTeamState.CarrierName then
-			setText(self.LastStandHint, string.upper(myTeamState.CarrierName) .. " HAS YOUR FLAG - stop them!")
+		if myTeamState.CarrierName and myTeamState.CarrierTeam == myTeamState.Team then
+			setText(self.LastStandHint, string.upper(myTeamState.CarrierName) .. " IS BRINGING YOUR FLAG HOME - escort them!")
+		elseif myTeamState.CarrierName then
+			setText(self.LastStandHint, string.upper(myTeamState.CarrierName) .. " HAS YOUR FLAG - kill them to drop it!")
+		elseif myTeamState.Recoverable then
+			setText(self.LastStandHint, "YOUR FLAG WAS DROPPED - grab it and bring it to your base ruins!")
 		else
 			setText(self.LastStandHint, "YOUR FLAG IS ON THE GROUND - enemies can grab it")
 		end
@@ -290,10 +294,15 @@ function HUD:Update(state)
 			carrying = teamState
 		end
 	end
-	if carrying and not inLastStand then
+	if carrying then
 		self.LastStand.Visible = true
-		setText(self.LastStandHint, "YOU HAVE THE " .. string.upper(Constants.GetTeamName(carrying.Team)) .. " FLAG")
-		setText(self.LastStandTimer, "Bring it into your own base to destroy it")
+		if carrying.Team == myTeam then
+			setText(self.LastStandHint, "YOU HAVE YOUR FLAG")
+			setText(self.LastStandTimer, "Bring it to your base ruins to rebuild the base")
+		else
+			setText(self.LastStandHint, "YOU HAVE THE " .. string.upper(Constants.GetTeamName(carrying.Team)) .. " FLAG")
+			setText(self.LastStandTimer, "Bring it into your own base to destroy it")
+		end
 	end
 end
 

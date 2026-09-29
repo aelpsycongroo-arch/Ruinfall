@@ -539,8 +539,14 @@ local function think(brain)
 		moveTo(brain, home)
 		return
 	end
+	if baseState and baseState.FlagState == "LastStand" and not baseState.Carrier and baseState.Recoverable and baseState.DropPosition
+		and Util.FlatDistance(position, baseState.DropPosition) < 120 then
+		setState(brain, "Recover Flag")
+		moveTo(brain, baseState.DropPosition)
+		return
+	end
 	if baseState and baseState.FlagState == "LastStand" and baseState.Carrier and baseState.Carrier.Alive
-		and not entity.CarryingFragment and Util.FlatDistance(position, CombatService.GetPosition(baseState.Carrier)) < 90 then
+		and baseState.Carrier.Team ~= entity.Team and not entity.CarryingFragment and Util.FlatDistance(position, CombatService.GetPosition(baseState.Carrier)) < 90 then
 		setState(brain, "Chase Flag Carrier")
 		engage(brain, baseState.Carrier)
 		return

@@ -24,6 +24,9 @@ local function flagText(teamState)
 	elseif teamState.FlagState == "Intact" then
 		return "Flag " .. teamState.FlagHealth, Theme.Colors.Text
 	elseif teamState.FlagState == "LastStand" then
+		if teamState.CarrierName and teamState.CarrierTeam == teamState.Team then
+			return "Flag Returning", Theme.Colors.GoldBright
+		end
 		return teamState.CarrierName and "Flag Taken!" or "Flag Down", Theme.Colors.Red
 	end
 	return "Flag Destroyed", Theme.Colors.Muted

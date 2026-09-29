@@ -56,7 +56,7 @@ function TopLeftPanel:Update(state, myTeam, myTeamState)
 		setText(self.FlagValue, string.format("%d / %d", myTeamState.FlagHealth, myTeamState.FlagMaxHealth))
 		self.FlagValue.TextColor3 = Theme.Colors.Text
 	elseif myTeamState.FlagState == "LastStand" then
-		setText(self.FlagValue, myTeamState.CarrierName and "TAKEN!" or "DOWN")
+		setText(self.FlagValue, myTeamState.CarrierName and (myTeamState.CarrierTeam == myTeamState.Team and "RETURNING" or "TAKEN!") or "DOWN")
 		self.FlagValue.TextColor3 = Theme.Colors.Red
 		fraction = 0
 	else

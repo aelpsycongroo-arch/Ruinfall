@@ -5,8 +5,9 @@
 --   Intact    - team respawns and shops normally.
 --   LastStand - "FLAG DOWN": the flag base was destroyed and dropped its banner on the
 --               ground. An enemy picks it up by walking into it; if the carrier dies it
---               drops where they fell. While the banner is not destroyed the team can
---               re-anchor the base with a Core Fragment (restores the base, banner returns).
+--               drops where they fell - and then the OWNERS may grab it too and carry it
+--               back into their base ruins to rebuild the base. While the banner is not
+--               destroyed the team can also re-anchor the base with a Core Fragment.
 --               Dead members wait (no respawn) until then.
 --   Lost      - "FLAG DESTROYED": an enemy carried the banner into their own intact base.
 --               No respawns, no shopping, no restoring - the team fights on until its
@@ -306,8 +307,10 @@ local function clearBanner(state)
 	state.DropPosition = nil
 end
 
-local function dropBanner(state, position)
+local function dropBanner(state, position, recoverable)
 	clearBanner(state)
+	-- dropped by a killed carrier: the owners may pick it up and carry it home
+	state.Recoverable = recoverable == true
 	local ground = Vector3.new(position.X, state.Base.Position.Y, position.Z)
 	local model, pole, cloth, glow = bannerModel(state.Team, true)
 	placeBanner(model, pole, cloth, glow, CFrame.new(ground) * CFrame.Angles(0, 0, math.rad(12)))
@@ -334,6 +337,11 @@ local function pickUpBanner(state, hero)
 	hero.Model:SetAttribute("CarryingFlag", state.Team)
 	CombatService.BreakStealth(hero)
 	local name = hero.Participant and hero.Participant.Name or "An enemy"
+	if hero.Team == state.Team then
+		Net.Notify(PlayerService.GetTeamPlayers(state.Team), "FLAG RECOVERED", "Success", { Banner = true, Sub = name .. " has your flag - escort it back to your base ruins to rebuild the base!" })
+		Net.Notify(nil, string.format("%s recovered the %s flag", name, Constants.GetTeamName(state.Team)), "Info")
+		return
+	end
 	Net.Notify(PlayerService.GetTeamPlayers(state.Team), "YOUR FLAG WAS TAKEN", "Danger", { Banner = true, Sub = name .. " has it - kill them, or restore your base with a Core Fragment!" })
 	Net.Notify(PlayerService.GetTeamPlayers(hero.Team), "ENEMY FLAG TAKEN", "Success", { Banner = true, Sub = "Carry it into your own base to destroy it" })
 	Net.Notify(nil, string.format("%s took the %s flag", name, Constants.GetTeamName(state.Team)), "Info")
@@ -351,7 +359,9 @@ local function setLost(state, reason)
 	Net.Notify(nil, teamName .. " FLAG DESTROYED - they fight on without respawns", "Warning")
 end
 
--- enemies walk into a dropped banner to grab it; carriers destroy it at their own base
+local restoreFlag -- defined below
+-- enemies walk into a dropped banner to grab it; carriers destroy it at their own base. After a
+-- carrier was killed the owners may grab it as well and carry it home to rebuild their base.
 local function processBanner(state)
 	if state.FlagState ~= "LastStand" then
 		return
@@ -360,12 +370,19 @@ local function processBanner(state)
 	if carrier then
 		if not carrier.Alive or not carrier.Model or not carrier.Model.Parent then
 			local where = state.CarrierLastPosition or state.Base.Position
-			dropBanner(state, where)
+			dropBanner(state, where, true)
 			Net.Notify(nil, string.format("The %s flag was dropped", Constants.GetTeamName(state.Team)), "Info")
 			return
 		end
 		local position = CombatService.GetPosition(carrier)
 		state.CarrierLastPosition = position
+		if carrier.Team == state.Team then
+			-- the owners brought their flag back to the ruins of their base: it is rebuilt
+			if Util.FlatDistance(position, state.Base.Position) <= FLAG.CAPTURE_RADIUS then
+				restoreFlag(state, carrier)
+			end
+			return
+		end
 		local home = BaseService.Teams[carrier.Team]
 		if home and home.FlagState == "Intact" and Util.FlatDistance(position, home.Base.Position) <= FLAG.CAPTURE_RADIUS then
 			if carrier.Participant then
@@ -379,16 +396,24 @@ local function processBanner(state)
 	if not state.DropPosition then
 		return
 	end
-	local grabber = CombatService.FindNearestEnemy(state.FlagEntity, state.DropPosition, FLAG.PICKUP_RADIUS, function(entity)
-		return entity.Kind == "Hero" and entity.Alive and not entity.CarryingFlag
-	end)
+	local grabber, best = nil, math.huge
+	for _, entity in ipairs(CombatService.GetEntitiesInRadius(state.DropPosition, FLAG.PICKUP_RADIUS, function(candidate)
+		return candidate.Kind == "Hero" and candidate.Alive and not candidate.CarryingFlag
+			and (candidate.Team ~= state.Team or state.Recoverable)
+	end)) do
+		local distance = Util.FlatDistance(CombatService.GetPosition(entity), state.DropPosition)
+		if distance < best then
+			grabber, best = entity, distance
+		end
+	end
 	if grabber then
 		pickUpBanner(state, grabber)
 	end
 end
 
-local function restoreFlag(state, hero)
+restoreFlag = function(state, hero)
 	clearBanner(state) -- the banner flies home
+	state.Recoverable = false
 	state.FlagState = "Intact"
 	state.LastStandRemaining = 0
 	state.Secured = false
@@ -507,7 +532,7 @@ function BaseService.Init()
 		if entity.CarryingFlag then
 			local carried = BaseService.Teams[entity.CarryingFlag]
 			if carried and carried.Carrier == entity and carried.FlagState == "LastStand" then
-				dropBanner(carried, CombatService.GetPosition(entity))
+				dropBanner(carried, CombatService.GetPosition(entity), true)
 				Net.Notify(nil, string.format("The %s flag was dropped", Constants.GetTeamName(carried.Team)), "Info")
 			end
 			entity.CarryingFlag = nil
@@ -649,6 +674,8 @@ function BaseService.Serialize()
 			DropPosition = state.DropPosition,
 			CarrierId = state.Carrier and state.Carrier.Id or nil,
 			CarrierName = state.Carrier and state.Carrier.Participant and state.Carrier.Participant.Name or nil,
+			CarrierTeam = state.Carrier and state.Carrier.Team or nil,
+			Recoverable = state.Recoverable == true,
 			CarrierPosition = state.Carrier and state.Carrier.Alive and CombatService.GetPosition(state.Carrier) or nil,
 		})
 	end
